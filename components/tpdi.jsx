@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer,
 } from "recharts";
+import { createClient } from "@/lib/supabase/client";
 
 /*
   TPDI — Player Disposition Inventory (cold-start prior)
@@ -133,6 +134,52 @@ export default function TPDI() {
   const current = order[idx];
   const answeredCount = Object.keys(answers).length;
 
+  // --- Supabase: durable identity + persistence ---
+  const supabase = useMemo(() => createClient(), []);
+  const [userId, setUserId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [existing, setExisting] = useState(null); // { scores, created_at } of last saved profile
+  const [viewSaved, setViewSaved] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      // ensure a session, creating an anonymous one if needed
+      let { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (error) { console.error("anon sign-in failed:", error.message); return; }
+        user = data.user;
+      }
+      if (!active || !user) return;
+      setUserId(user.id);
+      // read-back: most recent profile for this respondent (RLS restricts to own rows)
+      const { data: rows, error } = await supabase
+        .from("tpdi_responses")
+        .select("scores, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (active && !error && rows && rows.length) setExisting(rows[0]);
+    })();
+    return () => { active = false; };
+  }, [supabase]);
+
+  async function saveProfile() {
+    if (!userId || saving || saved) return;
+    setSaving(true);
+    const { error } = await supabase.from("tpdi_responses").insert({
+      respondent_id: userId,
+      instrument_version: "tpdi-v1.0-draft",
+      answers,
+      scores: result,
+      item_order: order.map((it) => it.id),
+    });
+    setSaving(false);
+    if (error) console.error("save failed:", error.message);
+    else { setSaved(true); setExisting({ scores: result, created_at: new Date().toISOString() }); }
+  }
+
   function record(val) {
     setAnswers((a) => ({ ...a, [current.id]: val }));
     if (idx < order.length - 1) setIdx(idx + 1);
@@ -186,9 +233,11 @@ export default function TPDI() {
     return { axisMean, ipsa, weights, intensity: axisMean.I, personMean, nbCount };
   }, [answers]);
 
+  const shown = viewSaved && existing ? existing.scores : result;
+
   const radarData = FLAVOR.map((k) => ({
     axis: AXES[k].name.replace("The ", ""),
-    value: result.axisMean[k] === null ? 0 : result.axisMean[k],
+    value: shown.axisMean[k] === null ? 0 : shown.axisMean[k],
     full: 5,
   }));
 
@@ -234,11 +283,19 @@ export default function TPDI() {
               statement does not fit your experience yet, you can mark it as no basis to answer.
             </p>
 
-            <button onClick={() => setPhase("quiz")} className="tpdi-foc"
+            <button onClick={() => { setViewSaved(false); setPhase("quiz"); }} className="tpdi-foc"
               style={{ marginTop: 28, background: C.brass, color: C.ink, border: "none", borderRadius: 10,
                 padding: "14px 26px", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>
               Begin
             </button>
+            {existing && (
+              <button onClick={() => { setViewSaved(true); setPhase("results"); }} className="tpdi-foc"
+                style={{ marginTop: 28, marginLeft: 12, background: "none", color: C.brass,
+                  border: `1px solid ${C.brassDim}`, borderRadius: 10, padding: "14px 22px",
+                  fontSize: 15, cursor: "pointer" }}>
+                View your last profile
+              </button>
+            )}
           </div>
         )}
 
@@ -313,7 +370,7 @@ export default function TPDI() {
         {phase === "results" && (
           <div className="tpdi-fade">
             <h2 className="tpdi-serif" style={{ fontSize: 30, fontWeight: 600, margin: "4px 0 6px" }}>
-              Your starting profile
+              {viewSaved ? "Your saved profile" : "Your starting profile"}
             </h2>
             <p style={{ color: C.muted, fontSize: 14.5, lineHeight: 1.6, maxWidth: 560, marginBottom: 18 }}>
               The shape below is relative emphasis across the five flavor axes: what pulls you, compared
@@ -343,7 +400,7 @@ export default function TPDI() {
               <div className="tpdi-mono" style={{ fontSize: 11, letterSpacing: "0.18em", color: C.brass, textTransform: "uppercase", marginBottom: 14 }}>
                 Your profile leans
               </div>
-              {result.weights.slice(0, 3).map((w) => {
+              {shown.weights.slice(0, 3).map((w) => {
                 const ax = AXES[w.key];
                 return (
                   <div key={w.key} style={{ marginBottom: 12 }}>
@@ -367,11 +424,11 @@ export default function TPDI() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
                 <span className="tpdi-mono" style={{ fontSize: 11, letterSpacing: "0.18em", color: C.brass, textTransform: "uppercase" }}>Presence</span>
                 <span className="tpdi-mono" style={{ fontSize: 12, color: C.muted }}>
-                  {result.intensity === null ? "no data" : `${result.intensity.toFixed(1)} / 5`}
+                  {shown.intensity === null ? "no data" : `${shown.intensity.toFixed(1)} / 5`}
                 </span>
               </div>
               <div style={{ height: 6, background: C.line, borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ width: `${result.intensity === null ? 0 : ((result.intensity - 1) / 4) * 100}%`, height: "100%", background: C.brass }} />
+                <div style={{ width: `${shown.intensity === null ? 0 : ((shown.intensity - 1) / 4) * 100}%`, height: "100%", background: C.brass }} />
               </div>
               <p style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.55, marginTop: 12, marginBottom: 0 }}>
                 Shown as a raw level. A true presence score is set against other players, so this gets
@@ -383,16 +440,27 @@ export default function TPDI() {
             <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.6, marginTop: 18 }}>
               This is a preference, not a verdict, and it is meant to change. It is the prior your GM
               tools start from; logged sessions update it toward how you actually play.
-              {result.nbCount > 0 && (
-                <span> You skipped {result.nbCount} {result.nbCount === 1 ? "item" : "items"}, so confidence is lower on the affected axes.</span>
+              {shown.nbCount > 0 && (
+                <span> You skipped {shown.nbCount} {shown.nbCount === 1 ? "item" : "items"}, so confidence is lower on the affected axes.</span>
               )}
             </p>
 
-            <button onClick={() => { setAnswers({}); setIdx(0); setPhase("intro"); }} className="tpdi-foc"
-              style={{ marginTop: 22, background: "none", color: C.brass, border: `1px solid ${C.brassDim}`,
-                borderRadius: 10, padding: "12px 22px", fontSize: 15, cursor: "pointer" }}>
-              Retake
-            </button>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 22, flexWrap: "wrap" }}>
+              {!viewSaved && (
+                <button onClick={saveProfile} disabled={saving || saved || !userId} className="tpdi-foc"
+                  style={{ background: saved ? "none" : C.brass, color: saved ? C.agree : C.ink,
+                    border: saved ? `1px solid ${C.agree}` : "none", borderRadius: 10,
+                    padding: "12px 22px", fontSize: 15, fontWeight: 600,
+                    cursor: saving || saved || !userId ? "default" : "pointer", opacity: !userId ? 0.6 : 1 }}>
+                  {saved ? "Saved" : saving ? "Saving..." : "Save my profile"}
+                </button>
+              )}
+              <button onClick={() => { setAnswers({}); setIdx(0); setOrder(shuffled(ITEMS)); setSaved(false); setViewSaved(false); setPhase("intro"); }} className="tpdi-foc"
+                style={{ background: "none", color: C.brass, border: `1px solid ${C.brassDim}`,
+                  borderRadius: 10, padding: "12px 22px", fontSize: 15, cursor: "pointer" }}>
+                {viewSaved ? "Take it again" : "Retake"}
+              </button>
+            </div>
           </div>
         )}
       </div>

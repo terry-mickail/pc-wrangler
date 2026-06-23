@@ -113,7 +113,7 @@ export default function GMWorkspace() {
   async function removeCharacter(id: string) {
     setErr(null);
     const { error } = await supabase.from("characters").update({ active: false }).eq("id", id);
-    if (error) setErr(error.message); else await loadCharacters(selected);
+    if (error) setErr(error.message); else if (selected) await loadCharacters(selected);
   }
 
   // ---- coverage analysis (deterministic) ----
@@ -288,7 +288,7 @@ export default function GMWorkspace() {
   );
 }
 
-function Shell({ children }) {
+function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: C.ink, color: C.vellum, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`.tpdi-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}`}</style>

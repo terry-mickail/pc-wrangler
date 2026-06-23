@@ -12,7 +12,7 @@ const C = {
 
 // Buckets the analyzer treats as the party's "core" coverage targets.
 const CORE = ["healing", "aoe", "single_target", "face", "control", "detect_magic", "utility", "tank", "ranged"];
-const LABEL = {
+const LABEL: Record<string, string> = {
   healing: "Healing", aoe: "Area damage", single_target: "Single-target",
   face: "Social / face", control: "Control", detect_magic: "Detect magic",
   utility: "Utility", tank: "Tank / frontline", ranged: "Ranged", melee: "Melee",
@@ -28,14 +28,14 @@ const btnGhost = { background: "none", color: C.brass, border: `1px solid ${C.br
 
 export default function GMWorkspace() {
   const supabase = useMemo(() => createClient(), []);
-  const [userId, setUserId] = useState(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const [campaigns, setCampaigns] = useState([]);
-  const [caps, setCaps] = useState([]); // class_capabilities rows
-  const [selected, setSelected] = useState(null); // campaign id
-  const [characters, setCharacters] = useState([]);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [caps, setCaps] = useState<any[]>([]); // class_capabilities rows
+  const [selected, setSelected] = useState<string | null>(null); // campaign id
+  const [characters, setCharacters] = useState<any[]>([]);
 
   // forms
   const [newCampaign, setNewCampaign] = useState({ name: "", system: "5e" });
@@ -63,7 +63,7 @@ export default function GMWorkspace() {
     return () => { active = false; };
   }, [supabase]);
 
-  const loadCharacters = useCallback(async (campaignId) => {
+  const loadCharacters = useCallback(async (campaignId: string) => {
     const { data, error } = await supabase
       .from("characters")
       .select("id,name,class,subclass,level,species,active")
@@ -110,7 +110,7 @@ export default function GMWorkspace() {
     setBusy(false);
   }
 
-  async function removeCharacter(id) {
+  async function removeCharacter(id: string) {
     setErr(null);
     const { error } = await supabase.from("characters").update({ active: false }).eq("id", id);
     if (error) setErr(error.message); else await loadCharacters(selected);
@@ -119,7 +119,7 @@ export default function GMWorkspace() {
   // ---- coverage analysis (deterministic) ----
   const capIndex = useMemo(() => {
     // class -> baseline caps; "class|subclass" -> subclass caps
-    const m = {};
+    const m: Record<string, string[]> = {};
     for (const r of caps) {
       const key = r.subclass ? `${r.class}|${r.subclass}` : r.class;
       m[key] = r.capabilities || [];
@@ -128,8 +128,8 @@ export default function GMWorkspace() {
   }, [caps]);
 
   const coverage = useMemo(() => {
-    const present = new Set();
-    const contributors = {}; // bucket -> [char names]
+    const present = new Set<string>();
+    const contributors: Record<string, string[]> = {}; // bucket -> [char names]
     for (const ch of characters) {
       const base = capIndex[ch.class] || [];
       const sub = ch.subclass ? (capIndex[`${ch.class}|${ch.subclass}`] || []) : [];
@@ -140,8 +140,8 @@ export default function GMWorkspace() {
     }
     const missing = CORE.filter((b) => !present.has(b));
     // suggestions: which classes would fill each missing bucket
-    const suggestFor = (bucket) => {
-      const classes = [];
+    const suggestFor = (bucket: string) => {
+      const classes: string[] = [];
       for (const r of caps) {
         if ((r.capabilities || []).includes(bucket)) {
           const label = r.subclass ? `${r.class} (${r.subclass})` : r.class;
@@ -150,11 +150,13 @@ export default function GMWorkspace() {
       }
       return classes.slice(0, 4);
     };
+    const suggestions: Record<string, string[]> = {};
+    for (const b of missing) suggestions[b] = suggestFor(b);
     return {
       present: CORE.filter((b) => present.has(b)),
       missing,
       contributors,
-      suggestions: Object.fromEntries(missing.map((b) => [b, suggestFor(b)])),
+      suggestions,
     };
   }, [characters, capIndex, caps]);
 

@@ -1,0 +1,23 @@
+#!/bin/sh
+# ---------------------------------------------------------------
+# Pre-push gate. Runs the SAME production build Vercel runs, locally,
+# so type errors and prerender errors are caught here in ~10-30s instead
+# of after a push-and-wait round trip. Runs only on `git push`.
+# ---------------------------------------------------------------
+
+echo "> Running production build before push (type + prerender check)..."
+echo "  (~10-30s; only runs on push)"
+
+npm run build
+STATUS=$?
+
+if [ "$STATUS" -ne 0 ]; then
+  echo ""
+  echo "x BUILD FAILED - push aborted."
+  echo "  Fix the errors shown above, commit, and push again."
+  echo "  Emergency bypass (not recommended): git push --no-verify"
+  exit 1
+fi
+
+echo "ok Build succeeded - pushing."
+exit 0

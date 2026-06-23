@@ -7,30 +7,30 @@ const C = {
   ink: "#15131E", panel: "#211D30", line: "#332C46", vellum: "#ECE3CF",
   muted: "#8B85A0", brass: "#C8A24B", brassDim: "#8A7335", accent: "#6C76B0", warn: "#A8493E",
 };
-const AXIS_COLOR = { N: "#B7615A", T: "#C8A24B", O: "#4E8077", S: "#CE8A42", E: "#6C76B0", I: "#9A93B0" };
-const AXIS_NAME = { N: "Character", T: "Encounter", O: "System", S: "Table", E: "World", I: "Presence" };
+const AXIS_COLOR: Record<string, string> = { N: "#B7615A", T: "#C8A24B", O: "#4E8077", S: "#CE8A42", E: "#6C76B0", I: "#9A93B0" };
+const AXIS_NAME: Record<string, string> = { N: "Character", T: "Encounter", O: "System", S: "Table", E: "World", I: "Presence" };
 
 const box = { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 18, marginBottom: 16 };
 const inputStyle = { background: C.ink, color: C.vellum, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 11px", fontSize: 14 };
 const btn = { background: C.brass, color: C.ink, border: "none", borderRadius: 9, padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" };
 const btnGhost = { background: "none", color: C.brass, border: `1px solid ${C.brassDim}`, borderRadius: 9, padding: "9px 16px", fontSize: 13, cursor: "pointer" };
 const CAT_ORDER = ["opportunity", "response", "reward", "meta"];
-const CAT_LABEL = { opportunity: "Opportunities", response: "Responses", reward: "Rewards", meta: "Notes" };
+const CAT_LABEL: Record<string, string> = { opportunity: "Opportunities", response: "Responses", reward: "Rewards", meta: "Notes" };
 
 export default function SessionWorkspace() {
   const supabase = useMemo(() => createClient(), []);
-  const [userId, setUserId] = useState(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [campaigns, setCampaigns] = useState([]);
-  const [eventTypes, setEventTypes] = useState([]);
-  const [campaign, setCampaign] = useState(null);
-  const [characters, setCharacters] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [session, setSession] = useState(null);
-  const [events, setEvents] = useState([]);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [eventTypes, setEventTypes] = useState<any[]>([]);
+  const [campaign, setCampaign] = useState<string | null>(null);
+  const [characters, setCharacters] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [session, setSession] = useState<string | null>(null);
+  const [events, setEvents] = useState<any[]>([]);
 
   // forms
   const [newSession, setNewSession] = useState({ modality: "in_person", consent: false, notes: "" });
@@ -56,7 +56,7 @@ export default function SessionWorkspace() {
     return () => { active = false; };
   }, [supabase]);
 
-  const loadCampaignData = useCallback(async (campaignId) => {
+  const loadCampaignData = useCallback(async (campaignId: string) => {
     const [{ data: chars }, { data: sess }] = await Promise.all([
       supabase.from("characters").select("id,name,class,subclass,kind,active")
         .eq("campaign_id", campaignId).eq("active", true).order("kind").order("name"),
@@ -69,7 +69,7 @@ export default function SessionWorkspace() {
 
   useEffect(() => { if (campaign) loadCampaignData(campaign); }, [campaign, loadCampaignData]);
 
-  const loadEvents = useCallback(async (sessionId) => {
+  const loadEvents = useCallback(async (sessionId: string) => {
     const { data } = await supabase.from("events")
       .select("id,character_id,event_type,axis,frame,target,payload,created_at")
       .eq("session_id", sessionId).order("created_at", { ascending: false });
@@ -100,7 +100,7 @@ export default function SessionWorkspace() {
     if (error) setErr(error.message); else loadCampaignData(campaign);
   }
 
-  function pickType(key) {
+  function pickType(key: string) {
     const t = eventTypes.find((x) => x.key === key);
     setEntry((e) => ({
       ...e, typeKey: key,
@@ -123,18 +123,18 @@ export default function SessionWorkspace() {
     setBusy(false);
   }
 
-  async function deleteEvent(id) {
+  async function deleteEvent(id: string) {
     const { error } = await supabase.from("events").delete().eq("id", id);
     if (error) setErr(error.message); else loadEvents(session);
   }
 
   // ---- derived ----
-  const charName = useCallback((id) => characters.find((c) => c.id === id)?.name || "— table —", [characters]);
-  const typeLabel = useCallback((k) => eventTypes.find((t) => t.key === k)?.label || k, [eventTypes]);
+  const charName = useCallback((id: string) => characters.find((c) => c.id === id)?.name || "— table —", [characters]);
+  const typeLabel = useCallback((k: string) => eventTypes.find((t) => t.key === k)?.label || k, [eventTypes]);
 
   // live tally: events per character this session (spotlight preview)
   const tally = useMemo(() => {
-    const perChar = {};
+    const perChar: Record<string, number> = {};
     for (const ev of events) {
       const key = ev.character_id || "__table__";
       perChar[key] = (perChar[key] || 0) + 1;
@@ -146,7 +146,7 @@ export default function SessionWorkspace() {
   }, [events, charName]);
 
   const typesByCat = useMemo(() => {
-    const m = {};
+    const m: Record<string, any[]> = {};
     for (const t of eventTypes) (m[t.category] ||= []).push(t);
     return m;
   }, [eventTypes]);

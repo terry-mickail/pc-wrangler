@@ -21,6 +21,19 @@ const LABEL: Record<string, string> = {
 
 const PHB_CLASSES = ["Artificer","Barbarian","Bard","Cleric","Druid","Fighter","Monk","Paladin","Ranger","Rogue","Sorcerer","Warlock","Wizard"];
 
+const AXIS_LABEL: Record<string, string> = { N: "Character", T: "Encounter", O: "System", S: "Table", E: "World", I: "Presence" };
+
+const SPECIES = [
+  "Aarakocra","Aasimar","Aeormaton","Air Genasi","Astral Elf","Autognome","Bugbear","Centaur",
+  "Changeling","Deep Gnome","Dhampir","Dragonborn","Duergar","Dwarf","Earth Genasi","Eladrin","Elf",
+  "Fairy","Firbolg","Fire Genasi","Genasi","Giff","Githyanki","Githzerai","Gnome","Goblin","Goliath",
+  "Grung","Hadozee","Half-Elf","Half-Orc","Halfling","Harengon","Hexblood","Hobgoblin","Human",
+  "Kalashtar","Kender","Kenku","Khoravar","Kobold","Leonin","Lizardfolk","Lotusden Halfling","Loxodon",
+  "Minotaur","Orc","Owlin","Pallid Elf","Plasmoid","Reborn","Satyr","Sea Elf","Shadar-kai","Shifter",
+  "Simic Hybrid","Tabaxi","Thri-kreen","Tiefling","Tortle","Triton","Vedalken","Verdan","Warforged",
+  "Water Genasi","Yuan-ti",
+];
+
 const box = { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 18 };
 const inputStyle = { background: C.ink, color: C.vellum, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 11px", fontSize: 14, width: "100%" };
 const btn = { background: C.brass, color: C.ink, border: "none", borderRadius: 9, padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" };
@@ -36,6 +49,7 @@ export default function GMWorkspace() {
   const [caps, setCaps] = useState<any[]>([]); // class_capabilities rows
   const [selected, setSelected] = useState<string | null>(null); // campaign id
   const [characters, setCharacters] = useState<any[]>([]);
+  const [dispositions, setDispositions] = useState<any[]>([]);
 
   // forms
   const [newCampaign, setNewCampaign] = useState({ name: "", system: "5e" });
@@ -50,14 +64,16 @@ export default function GMWorkspace() {
       if (!user) { if (active) { setErr("Please sign in to use the GM workspace."); setLoading(false); } return; }
       if (!active) return;
       setUserId(user.id);
-      const [{ data: camps, error: e1 }, { data: capRows, error: e2 }] = await Promise.all([
+      const [{ data: camps, error: e1 }, { data: capRows, error: e2 }, { data: dispRows }] = await Promise.all([
         supabase.from("campaigns").select("id,name,system,gm_id").order("created_at", { ascending: false }),
         supabase.from("class_capabilities").select("class,subclass,capabilities"),
+        supabase.from("tpdi_responses").select("id,player_name,scores,assigned_character_id,respondent_id,created_at").not("player_name", "is", null).order("created_at", { ascending: false }),
       ]);
       if (!active) return;
       if (e1) setErr(e1.message);
       setCampaigns(camps || []);
       setCaps(capRows || []);
+      setDispositions(dispRows || []);
       setLoading(false);
     })();
     return () => { active = false; };
@@ -106,7 +122,7 @@ export default function GMWorkspace() {
       species: newChar.species.trim() || null,
     });
     if (error) setErr(error.message);
-    else { setNewChar({ name: "", class: "", subclass: "", level: "", species: "" }); await loadCharacters(selected); }
+    else { setNewChar({ name: "", class: "", subclass: "", level: "", species: "" }); if (selected) await loadCharacters(selected); }
     setBusy(false);
   }
 
@@ -114,6 +130,16 @@ export default function GMWorkspace() {
     setErr(null);
     const { error } = await supabase.from("characters").update({ active: false }).eq("id", id);
     if (error) setErr(error.message); else if (selected) await loadCharacters(selected);
+  }
+
+  async function assignDisposition(responseId: string, characterId: string) {
+    if (!selected) return;
+    setErr(null);
+    const { error } = await supabase.from("tpdi_responses")
+      .update({ assigned_character_id: characterId || null, campaign_id: selected })
+      .eq("id", responseId);
+    if (error) setErr(error.message);
+    else setDispositions((ds) => ds.map((d) => (d.id === responseId ? { ...d, assigned_character_id: characterId || null } : d)));
   }
 
   // ---- coverage analysis (deterministic) ----
@@ -237,8 +263,11 @@ export default function GMWorkspace() {
               </select>
               <input style={{ ...inputStyle, maxWidth: 70 }} placeholder="Lvl" type="number"
                 value={newChar.level} onChange={(e) => setNewChar({ ...newChar, level: e.target.value })} />
-              <input style={{ ...inputStyle, maxWidth: 130 }} placeholder="Species (optional)"
-                value={newChar.species} onChange={(e) => setNewChar({ ...newChar, species: e.target.value })} />
+              <select style={{ ...inputStyle, maxWidth: 150 }} value={newChar.species}
+                onChange={(e) => setNewChar({ ...newChar, species: e.target.value })}>
+                <option value="">Species (optional)</option>
+                {SPECIES.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
+              </select>
               <button style={btn} onClick={addCharacter} disabled={busy}>Add</button>
             </div>
           </div>
@@ -280,6 +309,37 @@ export default function GMWorkspace() {
                   )}
                 </div>
               </>
+            )}
+          </div>
+
+          {/* player dispositions */}
+          <div style={box}>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
+              Player dispositions <span style={{ color: C.line }}>· taken on this account</span>
+            </div>
+            {dispositions.length === 0 ? (
+              <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>
+                None yet. Have each player open /play while you are signed in, enter their name, and save.
+                Their profile shows up here to assign to a character.
+              </p>
+            ) : (
+              dispositions.map((d) => {
+                const leanings = (d.scores?.weights || []).slice(0, 2)
+                  .map((w) => `${AXIS_LABEL[w.key] || w.key} ${Math.round((w.w || 0) * 100)}%`).join(", ");
+                return (
+                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${C.line}`, gap: 10 }}>
+                    <div style={{ fontSize: 13, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600 }}>{d.player_name || "Unnamed"}</span>
+                      {leanings && <span style={{ color: C.muted }}>{"  "}· {leanings}</span>}
+                    </div>
+                    <select style={{ ...inputStyle, maxWidth: 170 }} value={d.assigned_character_id || ""}
+                      onChange={(e) => assignDisposition(d.id, e.target.value)}>
+                      <option value="">— assign to —</option>
+                      {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

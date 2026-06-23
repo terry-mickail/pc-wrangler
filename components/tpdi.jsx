@@ -141,6 +141,7 @@ export default function TPDI() {
   const [saved, setSaved] = useState(false);
   const [existing, setExisting] = useState(null); // { scores, created_at } of last saved profile
   const [viewSaved, setViewSaved] = useState(false);
+  const [playerName, setPlayerName] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -170,6 +171,7 @@ export default function TPDI() {
     setSaving(true);
     const { error } = await supabase.from("tpdi_responses").insert({
       respondent_id: userId,
+      player_name: playerName.trim() || null,
       instrument_version: "tpdi-v1.0-draft",
       answers,
       scores: result,
@@ -281,6 +283,14 @@ export default function TPDI() {
             <p style={{ fontSize: 14, lineHeight: 1.6, color: C.muted, maxWidth: 560, marginTop: 14 }}>
               Answer for how you tend to play in general, not one character or one night. If a
               statement does not fit your experience yet, you can mark it as no basis to answer.
+            </p>
+
+            <input value={playerName} onChange={(e) => setPlayerName(e.target.value)}
+              placeholder="Your name (optional)"
+              style={{ marginTop: 22, background: C.ink2, color: C.vellum, border: `1px solid ${C.line}`,
+                borderRadius: 10, padding: "12px 14px", fontSize: 15, width: "100%", maxWidth: 320, display: "block" }} />
+            <p style={{ fontSize: 12.5, color: C.muted, marginTop: 8 }}>
+              Add your name if your GM is collecting profiles for the table.
             </p>
 
             <button onClick={() => { setViewSaved(false); setPhase("quiz"); }} className="tpdi-foc"

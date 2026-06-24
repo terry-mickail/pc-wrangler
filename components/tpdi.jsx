@@ -143,6 +143,7 @@ export default function TPDI() {
   const [existing, setExisting] = useState(null); // { scores, created_at } of last saved profile
   const [viewSaved, setViewSaved] = useState(false);
   const [playerName, setPlayerName] = useState("");
+  const [joinCampaign, setJoinCampaign] = useState(null); // { id, name } resolved from a share link
 
   useEffect(() => {
     let active = true;
@@ -159,7 +160,7 @@ export default function TPDI() {
       // read-back: most recent profile for this respondent (RLS restricts to own rows)
       const { data: rows, error } = await supabase
         .from("tpdi_responses")
-        .select("scores, created_at")
+        .select("id, scores, created_at, campaign_id")
         .order("created_at", { ascending: false })
         .limit(1);
       if (active && !error && rows && rows.length) setExisting(rows[0]);
@@ -167,20 +168,41 @@ export default function TPDI() {
     return () => { active = false; };
   }, [supabase]);
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("wrangler_player_name");
+      if (saved) setPlayerName(saved);
+      const code = new URLSearchParams(window.location.search).get("share");
+      if (code) {
+        supabase.rpc("resolve_share_code", { code }).then(({ data }) => {
+          if (data && data.length) setJoinCampaign({ id: data[0].campaign_id, name: data[0].campaign_name });
+        });
+      }
+    } catch (e) { /* no window */ }
+  }, [supabase]);
+
   async function saveProfile() {
     if (!userId || saving || saved) return;
     setSaving(true);
-    const { error } = await supabase.from("tpdi_responses").insert({
+    try { window.localStorage.setItem("wrangler_player_name", playerName.trim()); } catch (e) { /* no window */ }
+    const row = {
       respondent_id: userId,
       player_name: playerName.trim() || null,
+      campaign_id: joinCampaign ? joinCampaign.id : null,
       instrument_version: "tpdi-v1.0-draft",
       answers,
       scores: result,
       item_order: order.map((it) => it.id),
-    });
+    };
+    let error;
+    if (existing && existing.id) {
+      ({ error } = await supabase.from("tpdi_responses").update(row).eq("id", existing.id));
+    } else {
+      ({ error } = await supabase.from("tpdi_responses").insert(row));
+    }
     setSaving(false);
     if (error) console.error("save failed:", error.message);
-    else { setSaved(true); setExisting({ scores: result, created_at: new Date().toISOString() }); }
+    else { setSaved(true); setExisting({ id: existing && existing.id, scores: result, created_at: new Date().toISOString() }); }
   }
 
   function record(val) {
@@ -295,6 +317,11 @@ export default function TPDI() {
             <p style={{ fontSize: 12.5, color: C.muted, marginTop: 8 }}>
               Add your name if your GM is collecting profiles for the table.
             </p>
+            {joinCampaign && (
+              <div style={{ marginTop: 12, fontSize: 13, color: C.brass }}>
+                Joining <strong style={{ color: C.vellum }}>{joinCampaign.name}</strong>. Your result will be shared with your GM.
+              </div>
+            )}
 
             <button onClick={() => { setViewSaved(false); setPhase("quiz"); }} className="tpdi-foc"
               style={{ marginTop: 28, background: C.brass, color: C.ink, border: "none", borderRadius: 10,

@@ -51,6 +51,7 @@ export default function GMWorkspace() {
   const [selected, setSelected] = useState<string | null>(null); // campaign id
   const [characters, setCharacters] = useState<any[]>([]);
   const [dispositions, setDispositions] = useState<any[]>([]);
+  const [copied, setCopied] = useState<string | null>(null);
 
   // forms
   const [newCampaign, setNewCampaign] = useState({ name: "", system: "5e" });
@@ -66,7 +67,7 @@ export default function GMWorkspace() {
       if (!active) return;
       setUserId(user.id);
       const [{ data: camps, error: e1 }, { data: capRows, error: e2 }, { data: dispRows }] = await Promise.all([
-        supabase.from("campaigns").select("id,name,system,gm_id").order("created_at", { ascending: false }),
+        supabase.from("campaigns").select("id,name,system,gm_id,share_code").order("created_at", { ascending: false }),
         supabase.from("class_capabilities").select("class,subclass,capabilities"),
         supabase.from("tpdi_responses").select("id,player_name,scores,assigned_character_id,respondent_id,created_at").not("player_name", "is", null).order("created_at", { ascending: false }),
       ]);
@@ -131,6 +132,14 @@ export default function GMWorkspace() {
     setErr(null);
     const { error } = await supabase.from("characters").update({ active: false }).eq("id", id);
     if (error) setErr(error.message); else if (selected) await loadCharacters(selected);
+  }
+
+  function copyInvite(code: string) {
+    try {
+      navigator.clipboard.writeText(`${window.location.origin}/play?share=${code}`);
+      setCopied(code);
+      setTimeout(() => setCopied(null), 1500);
+    } catch (e) { /* clipboard unavailable */ }
   }
 
   async function assignDisposition(responseId: string, characterId: string) {
@@ -223,6 +232,16 @@ export default function GMWorkspace() {
           </select>
           <button style={btn} onClick={createCampaign} disabled={busy}>Create</button>
         </div>
+        {(() => {
+          const sc = campaigns.find((c) => c.id === selected);
+          return sc && sc.share_code ? (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, color: C.muted }}>Player invite link:</span>
+              <code style={{ fontSize: 12.5, color: C.vellum, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 7, padding: "5px 9px" }}>/play?share={sc.share_code}</code>
+              <button style={btnGhost} onClick={() => copyInvite(sc.share_code)}>{copied === sc.share_code ? "Copied" : "Copy link"}</button>
+            </div>
+          ) : null;
+        })()}
       </div>
 
       {selected && (
@@ -316,15 +335,15 @@ export default function GMWorkspace() {
           {/* player dispositions */}
           <div style={box}>
             <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
-              Player dispositions <span style={{ color: C.line }}>· taken on this account</span>
+              Player dispositions <span style={{ color: C.line }}>· from your invite link</span>
             </div>
-            {dispositions.length === 0 ? (
+            {dispositions.filter((d) => d.campaign_id === selected || d.campaign_id == null).length === 0 ? (
               <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>
-                None yet. Have each player open /play while you are signed in, enter their name, and save.
-                Their profile shows up here to assign to a character.
+                None yet. Copy the invite link above and send it to your players. When they fill out the
+                inventory under their name, their profile shows up here to assign to a character.
               </p>
             ) : (
-              dispositions.map((d) => {
+              dispositions.filter((d) => d.campaign_id === selected || d.campaign_id == null).map((d) => {
                 const leanings = (d.scores?.weights || []).slice(0, 2)
                   .map((w: any) => `${AXIS_LABEL[w.key] || w.key} ${Math.round((w.w || 0) * 100)}%`).join(", ");
                 return (

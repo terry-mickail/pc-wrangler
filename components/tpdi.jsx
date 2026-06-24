@@ -94,9 +94,12 @@ function scoreColor(v) {
 }
 
 // Decorative astrolabe ring used as the signature motif.
-function Astrolabe({ size = 320, spin = false }) {
+// `axes` mounts six battle-axes on the wheel (the "Six Axes" mark) so they spin with it.
+function Astrolabe({ size = 320, spin = false, axes = true }) {
   const r = size / 2;
   const ticks = Array.from({ length: 60 });
+  const rr = r * 0.72; // mount radius for the six axes
+  const s = size / 240; // axe glyph is drawn for size 240, then scaled
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true"
       style={{ display: "block" }}>
@@ -115,6 +118,18 @@ function Astrolabe({ size = 320, spin = false }) {
               stroke={C.brass} strokeWidth={long ? 1.2 : 0.6} opacity={long ? 0.6 : 0.35} />
           );
         })}
+        {axes && Array.from({ length: 6 }).map((_, i) => (
+          <g key={`axe-${i}`}
+            transform={`translate(${r} ${r}) rotate(${i * 60}) translate(0 ${-rr}) scale(${s})`}>
+            {/* haft + pommel, pointing inward toward the hub */}
+            <line x1="0" y1="8" x2="0" y2="-9" stroke={C.brassDim} strokeWidth="1.8" strokeLinecap="round" />
+            <circle cx="0" cy="8" r="1.5" fill={C.brassDim} />
+            {/* double-bit head, blades facing outward */}
+            <circle cx="0" cy="-10" r="2" fill={C.brass} />
+            <path d="M 1.4 -7 L 10 -8.4 Q 12 -10.4 10 -12.4 L 1.4 -13.4 Q 2.8 -10.2 1.4 -7 Z" fill={C.brass} opacity="0.92" />
+            <path d="M -1.4 -7 L -10 -8.4 Q -12 -10.4 -10 -12.4 L -1.4 -13.4 Q -2.8 -10.2 -1.4 -7 Z" fill={C.brass} opacity="0.92" />
+          </g>
+        ))}
       </g>
     </svg>
   );
@@ -292,9 +307,6 @@ export default function TPDI() {
           <div className="tpdi-fade">
             <div style={{ position: "relative", height: 240, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
               <Astrolabe size={240} spin={!reduce} />
-              <div style={{ position: "absolute", textAlign: "center" }}>
-                <div className="tpdi-mono" style={{ fontSize: 11, color: C.muted, letterSpacing: "0.2em" }}>SIX AXES</div>
-              </div>
             </div>
 
             <h1 className="tpdi-serif" style={{ fontSize: 40, lineHeight: 1.08, fontWeight: 600, margin: "8px 0 16px" }}>
@@ -421,7 +433,7 @@ export default function TPDI() {
             {/* radar inside astrolabe frame */}
             <div style={{ position: "relative", display: "flex", justifyContent: "center", marginTop: 4 }}>
               <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }}>
-                <Astrolabe size={360} spin={false} />
+                <Astrolabe size={360} spin={false} axes={false} />
               </div>
               <div style={{ width: "100%", maxWidth: 380, height: 320 }}>
                 <ResponsiveContainer width="100%" height="100%">

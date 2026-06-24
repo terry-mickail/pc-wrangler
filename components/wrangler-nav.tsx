@@ -8,6 +8,8 @@ const ALL_LINKS = [
   { href: "/gm", label: "Workspace", gm: true },
   { href: "/gm/sessions", label: "Sessions", gm: true },
   { href: "/gm/codex", label: "Codex", gm: true },
+  { href: "/gm/timeline", label: "Timeline", gm: true },
+  { href: "/gm/search", label: "Search", gm: true },
   { href: "/gm/table", label: "Check-in", gm: true },
   { href: "/gm/dashboard", label: "Dashboard", gm: true },
 ];

@@ -92,6 +92,53 @@ export default function Dashboard() {
     return [...loot].sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
   }, [loot]);
 
+  // ---- table health: derive plain-language flags from the loaded views ----
+  const health = useMemo(() => {
+    const alerts: { level: string; text: string }[] = [];
+    const latest = sessions[0]?.id || null;
+
+    // spotlight outliers in the latest session
+    const sl = spotlight.filter((s) => s.session_id === latest);
+    if (sl.length >= 2) {
+      const even = 1 / sl.length;
+      const sorted = [...sl].sort((a, b) => (b.share || 0) - (a.share || 0));
+      const top = sorted[0];
+      const bottom = sorted[sorted.length - 1];
+      if (top && (top.share || 0) > even * 1.75)
+        alerts.push({ level: "warn", text: `${top.character_name} is taking ${Math.round((top.share || 0) * 100)}% of the spotlight; an even share is ${Math.round(even * 100)}%.` });
+      if (bottom && (bottom.share || 0) < even * 0.5)
+        alerts.push({ level: "warn", text: `${bottom.character_name} is down at ${Math.round((bottom.share || 0) * 100)}% of the spotlight, well below an even ${Math.round(even * 100)}%.` });
+    }
+
+    // evenness trend direction
+    if (equityTrend.length >= 2) {
+      const first = equityTrend[0].cv || 0;
+      const last = equityTrend[equityTrend.length - 1].cv || 0;
+      if (last - first > 0.15)
+        alerts.push({ level: "warn", text: `Spotlight is getting less even over time (dispersion ${Number(first).toFixed(2)} to ${Number(last).toFixed(2)}).` });
+      else if (first - last > 0.15)
+        alerts.push({ level: "good", text: `The table is evening out over time (dispersion ${Number(first).toFixed(2)} to ${Number(last).toFixed(2)}).` });
+    }
+
+    // stale arcs
+    const stale = arcs.filter((a) => a.stale);
+    if (stale.length) {
+      const names = stale.map((a) => a.title).slice(0, 3).join(", ");
+      alerts.push({ level: "warn", text: `${stale.length} arc${stale.length > 1 ? "s" : ""} gone stale: ${names}${stale.length > 3 ? "..." : ""}.` });
+    }
+
+    // loot skew
+    if (loot.length >= 2) {
+      const sortedL = [...loot].sort((a, b) => (b.share || 0) - (a.share || 0));
+      const topL = sortedL[0];
+      const evenL = (topL && topL.equal_share) || (1 / loot.length);
+      if (topL && (topL.share || 0) > evenL * 1.75)
+        alerts.push({ level: "warn", text: `${topL.character_name} holds ${Math.round((topL.share || 0) * 100)}% of loot value; an even split is ${Math.round(evenL * 100)}%.` });
+    }
+
+    return alerts;
+  }, [sessions, spotlight, equityTrend, arcs, loot]);
+
   if (loading) return <Shell><p style={{ color: C.muted }}>Loading...</p></Shell>;
 
   return (
@@ -114,6 +161,23 @@ export default function Dashboard() {
 
       {campaign && (
         <>
+          {/* table health summary */}
+          <div style={box}>
+            <div style={head}>Table health</div>
+            {health.length === 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted }}>
+                <span style={{ color: C.good }}>●</span> No flags. Either the table looks balanced, or there is not enough logged yet.
+              </div>
+            ) : (
+              health.map((h, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13.5, padding: "6px 0", lineHeight: 1.5 }}>
+                  <span style={{ color: h.level === "warn" ? C.warn : h.level === "good" ? C.good : C.accent, marginTop: 1 }}>●</span>
+                  <span>{h.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+
           {/* equity trend */}
           <div style={box}>
             <div style={head}>Spotlight evenness across sessions (lower is more even)</div>

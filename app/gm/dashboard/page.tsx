@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import WranglerNav from "@/components/wrangler-nav";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // plum + sunflower palette (chart colors need real hex, not CSS vars)
@@ -225,18 +226,7 @@ export default function Dashboard() {
       <style>{CSS}</style>
       <div className="wg-wrap">
 
-        <header className="wg-nav">
-          <div className="wg-brand">
-            <span className="wg-mark">Wrangler</span>
-            <span className="wg-tag">run the table</span>
-          </div>
-          <nav className="wg-links">
-            <a className="wg-navlink" href="/play">Play</a>
-            <a className="wg-navlink" href="/gm">Roster</a>
-            <a className="wg-navlink" href="/gm/sessions">Sessions</a>
-            <a className="wg-navlink active" href="/gm/dashboard">Dashboard</a>
-          </nav>
-        </header>
+        <WranglerNav />
 
         {err && <div className="wg-card wg-err">{err}</div>}
 

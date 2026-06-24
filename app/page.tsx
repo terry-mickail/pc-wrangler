@@ -1,21 +1,22 @@
+import WranglerNav from "@/components/wrangler-nav";
+
 const C = {
-  ink: "#15131E", panel: "#211D30", line: "#332C46", vellum: "#ECE3CF",
-  muted: "#8B85A0", brass: "#C8A24B",
+  ink: "#1B1426", panel: "#251B33", line: "#3D2F52", vellum: "#F4EEFA",
+  muted: "#A597BD", brass: "#F4C430",
 };
 
 const SURFACES = [
   { href: "/play", title: "Player Disposition Inventory", blurb: "The onboarding questionnaire. Public, no login.", tag: "public" },
   { href: "/gm", title: "GM Workspace", blurb: "Create a campaign, build the roster, run coverage analysis.", tag: "gm" },
   { href: "/gm/sessions", title: "Session Log", blurb: "Run a session and log events to the spine.", tag: "gm" },
+  { href: "/gm/dashboard", title: "Dashboard", blurb: "Spotlight balance, arcs, loot, and table-health flags.", tag: "gm" },
 ];
 
 export default function Home() {
   return (
     <div style={{ background: C.ink, color: C.vellum, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "56px 22px" }}>
-        <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, letterSpacing: "0.24em", color: C.brass, textTransform: "uppercase", marginBottom: 16 }}>
-          Wrangler
-        </div>
+        <WranglerNav />
         <h1 style={{ fontFamily: "Iowan Old Style, Palatino, Georgia, serif", fontSize: 38, fontWeight: 600, margin: "0 0 12px" }}>
           A tool for running the table, not the world.
         </h1>

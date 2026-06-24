@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import WranglerNav from "@/components/wrangler-nav";
 
 // Palette consistent with the TPDI front door.
 const C = {
-  ink: "#15131E", panel: "#211D30", line: "#332C46", vellum: "#ECE3CF",
-  muted: "#8B85A0", brass: "#C8A24B", brassDim: "#8A7335",
-  have: "#5E8C7E", missing: "#A8493E",
+  ink: "#1B1426", panel: "#251B33", line: "#3D2F52", vellum: "#F4EEFA",
+  muted: "#A597BD", brass: "#F4C430", brassDim: "#B89230",
+  have: "#5DBE9A", missing: "#E07A5F",
 };
 
 // Buckets the analyzer treats as the party's "core" coverage targets.
@@ -325,7 +326,7 @@ export default function GMWorkspace() {
             ) : (
               dispositions.map((d) => {
                 const leanings = (d.scores?.weights || []).slice(0, 2)
-					.map((w: any) => `${AXIS_LABEL[w.key] || w.key} ${Math.round((w.w || 0) * 100)}%`).join(", ");
+                  .map((w) => `${AXIS_LABEL[w.key] || w.key} ${Math.round((w.w || 0) * 100)}%`).join(", ");
                 return (
                   <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${C.line}`, gap: 10 }}>
                     <div style={{ fontSize: 13, minWidth: 0 }}>
@@ -352,7 +353,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: C.ink, color: C.vellum, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`.tpdi-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}`}</style>
-      <div style={{ maxWidth: 820, margin: "0 auto", padding: "32px 20px" }}>{children}</div>
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: "32px 20px" }}><WranglerNav />{children}</div>
     </div>
   );
 }

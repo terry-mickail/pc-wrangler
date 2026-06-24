@@ -5,6 +5,7 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer,
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
+import WranglerNav from "@/components/wrangler-nav";
 
 /*
   TPDI — Player Disposition Inventory (cold-start prior)
@@ -18,18 +19,18 @@ import { createClient } from "@/lib/supabase/client";
 */
 
 const C = {
-  ink: "#15131E",
-  ink2: "#1E1B2B",
-  panel: "#211D30",
-  line: "#332C46",
-  vellum: "#ECE3CF",
+  ink: "#1B1426",
+  ink2: "#15101E",
+  panel: "#251B33",
+  line: "#3D2F52",
+  vellum: "#F4EEFA",
   vellumInk: "#221C2E",
-  vellumLine: "#CDC2A6",
-  brass: "#C8A24B",
-  brassDim: "#8A7335",
-  muted: "#8B85A0",
-  agree: "#5E8C7E",
-  disagree: "#A8493E",
+  vellumLine: "#3D2F52",
+  brass: "#F4C430",
+  brassDim: "#B89230",
+  muted: "#A597BD",
+  agree: "#5DBE9A",
+  disagree: "#E07A5F",
 };
 
 const AXES = {
@@ -256,6 +257,8 @@ export default function TPDI() {
       `}</style>
 
       <div className="px-5 py-8" style={{ maxWidth: 720, margin: "0 auto" }}>
+
+        <WranglerNav />
 
         {/* eyebrow */}
         <div className="tpdi-mono" style={{ fontSize: 11, letterSpacing: "0.22em", color: C.brass, textTransform: "uppercase", marginBottom: 22 }}>

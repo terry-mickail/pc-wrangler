@@ -7,6 +7,7 @@ const GM_LINKS = [
   { href: "/play", label: "Inventory" },
   { href: "/gm", label: "Workspace" },
   { href: "/gm/roster", label: "Roster" },
+  { href: "/gm/dispositions", label: "Dispositions" },
   { href: "/gm/sessions", label: "Sessions" },
   { href: "/gm/codex", label: "Codex" },
   { href: "/gm/timeline", label: "Timeline" },

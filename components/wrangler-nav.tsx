@@ -13,6 +13,7 @@ const GM_LINKS = [
   { href: "/gm/table", label: "Check-in" },
   { href: "/gm/capture", label: "Capture" },
   { href: "/gm/review", label: "Review" },
+  { href: "/gm/reliability", label: "Reliability" },
   { href: "/gm/dashboard", label: "Dashboard" },
 ];
 

@@ -22,6 +22,7 @@ const PLAYER_LINKS = [
   { href: "/play", label: "Inventory" },
   { href: "/vibe", label: "Check-in" },
   { href: "/chat", label: "Chat" },
+  { href: "/record", label: "Record" },
 ];
 
 const NAV_CSS = `

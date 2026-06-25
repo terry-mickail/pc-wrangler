@@ -10,7 +10,7 @@ const C = {
 };
 
 type Campaign = { id: string; name: string };
-type Char = { id: string; name: string; profile_id: string | null };
+type Char = { id: string; name: string; profile_id: string | null; invite_code: string | null };
 type Resp = { id: string; player_name: string | null; assigned_character_id: string | null; created_at: string };
 
 export default function RosterPage() {
@@ -23,6 +23,16 @@ export default function RosterPage() {
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [copied, setCopied] = useState<string>("");
+  const [origin, setOrigin] = useState<string>("");
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  const inviteLink = (code: string | null): string => code ? `${origin}/join?c=${code}` : "";
+  async function copyInvite(code: string | null) {
+    const link = inviteLink(code);
+    if (!link) return;
+    try { await navigator.clipboard.writeText(link); setCopied(code as string); setTimeout(() => setCopied(""), 1600); }
+    catch (e) { /* clipboard blocked */ }
+  }
 
   useEffect(() => {
     (async () => {
@@ -36,7 +46,7 @@ export default function RosterPage() {
   async function load(cid: string) {
     setLoading(true);
     const [{ data: ch }, { data: rs }, { data: ev }] = await Promise.all([
-      supabase.from("characters").select("id, name, profile_id").eq("campaign_id", cid).eq("kind", "pc").order("name", { ascending: true }),
+      supabase.from("characters").select("id, name, profile_id, invite_code").eq("campaign_id", cid).eq("kind", "pc").order("name", { ascending: true }),
       supabase.from("tpdi_responses").select("id, player_name, assigned_character_id, created_at").eq("campaign_id", cid).order("created_at", { ascending: false }),
       supabase.from("events").select("character_id").eq("campaign_id", cid),
     ]);
@@ -79,7 +89,7 @@ export default function RosterPage() {
 
         <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Roster &amp; identity</h1>
         <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
-          Bind each player&apos;s inventory to their character. This is the link the disposition model joins on: inventory becomes the prior, the character&apos;s events become the evidence.
+          Send each player their personal invite link below: opening it ties their inventory to that character from the start. Manual binding stays here as a fallback for anyone who took the inventory before joining.
         </p>
 
         <div style={box}>
@@ -111,9 +121,13 @@ export default function RosterPage() {
                   const r = respFor(ch.id);
                   return (
                     <div key={ch.id} style={{ ...box, marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div>
+                      <div style={{ minWidth: 240 }}>
                         <div style={{ fontSize: 15, fontWeight: 700 }}>{ch.name}</div>
                         <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{counts[ch.id] || 0} events logged</div>
+                        <button type="button" onClick={() => copyInvite(ch.invite_code)}
+                          style={{ marginTop: 8, background: "transparent", color: copied === ch.invite_code ? C.good : C.plum, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                          {copied === ch.invite_code ? "Copied!" : "Copy player invite"}
+                        </button>
                       </div>
                       {r ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

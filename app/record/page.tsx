@@ -73,6 +73,15 @@ export default function RecordPage() {
       setOpenSession(Boolean(ctx[0].open));
       setSessionNumber(ctx[0].session_number ?? null);
       setRoster((rost as RosterEntry[]) || []);
+
+      // if this player owns a character (claimed via their invite link), select it
+      const { data: mine } = await supabase.rpc("my_character", { p_share: code });
+      const owned = Array.isArray(mine) ? mine[0] : mine;
+      if (active && owned?.character_id) {
+        setCharId(owned.character_id);
+        try { window.localStorage.setItem("wrangler_record_character", owned.character_id); } catch (e) { /* no storage */ }
+      }
+
       setStatus("ready");
     })();
     return () => { active = false; };

@@ -11,6 +11,7 @@ const GM_LINKS = [
   { href: "/gm/timeline", label: "Timeline" },
   { href: "/gm/search", label: "Search" },
   { href: "/gm/table", label: "Check-in" },
+  { href: "/gm/capture", label: "Capture" },
   { href: "/gm/dashboard", label: "Dashboard" },
 ];
 

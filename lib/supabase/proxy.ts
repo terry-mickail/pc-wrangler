@@ -48,7 +48,8 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/vibe") &&
     !request.nextUrl.pathname.startsWith("/chat") &&
     !request.nextUrl.pathname.startsWith("/record") &&
-    !request.nextUrl.pathname.startsWith("/join")
+    !request.nextUrl.pathname.startsWith("/join") &&
+    !request.nextUrl.pathname.startsWith("/api/transcribe")
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();

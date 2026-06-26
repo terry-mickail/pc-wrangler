@@ -20,20 +20,22 @@ const LABEL: Record<string, string> = {
   stealth: "Stealth", support: "Support / buff",
 };
 
-const PHB_CLASSES = ["Artificer","Barbarian","Bard","Cleric","Druid","Fighter","Monk","Paladin","Ranger","Rogue","Sorcerer","Warlock","Wizard"];
+const CORE_CLASSES = ["Artificer","Barbarian","Bard","Cleric","Druid","Fighter","Monk","Paladin","Ranger","Rogue","Sorcerer","Warlock","Wizard"];
+const PARTNERED_CLASSES = ["Blood Hunter"]; // Critical Role / Matt Mercer
 
 const AXIS_LABEL: Record<string, string> = { N: "Character", T: "Encounter", O: "System", S: "Table", E: "World", I: "Presence" };
 
-const SPECIES = [
+const CORE_SPECIES = [
   "Aarakocra","Aasimar","Aeormaton","Air Genasi","Astral Elf","Autognome","Bugbear","Centaur",
   "Changeling","Deep Gnome","Dhampir","Dragonborn","Duergar","Dwarf","Earth Genasi","Eladrin","Elf",
   "Fairy","Firbolg","Fire Genasi","Genasi","Giff","Githyanki","Githzerai","Gnome","Goblin","Goliath",
   "Grung","Hadozee","Half-Elf","Half-Orc","Halfling","Harengon","Hexblood","Hobgoblin","Human",
-  "Kalashtar","Kender","Kenku","Khoravar","Kobold","Leonin","Lizardfolk","Lotusden Halfling","Loxodon",
-  "Minotaur","Orc","Owlin","Pallid Elf","Plasmoid","Reborn","Satyr","Sea Elf","Shadar-kai","Shifter",
+  "Kalashtar","Kender","Kenku","Khoravar","Kobold","Leonin","Lizardfolk","Loxodon",
+  "Minotaur","Orc","Owlin","Plasmoid","Reborn","Satyr","Sea Elf","Shadar-kai","Shifter",
   "Simic Hybrid","Tabaxi","Thri-kreen","Tiefling","Tortle","Triton","Vedalken","Verdan","Warforged",
   "Water Genasi","Yuan-ti",
 ];
+const PARTNERED_SPECIES = ["Lotusden Halfling","Pallid Elf"]; // Critical Role
 
 const box = { background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 18 };
 const inputStyle = { background: C.ink, color: C.vellum, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 11px", fontSize: 14, width: "100%" };
@@ -52,6 +54,7 @@ export default function GMWorkspace() {
   const [characters, setCharacters] = useState<any[]>([]);
   const [dispositions, setDispositions] = useState<any[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  const [partneredOn, setPartneredOn] = useState(false);
 
   // forms
   const [newCampaign, setNewCampaign] = useState({ name: "", system: "5e" });
@@ -68,8 +71,8 @@ export default function GMWorkspace() {
       setUserId(user.id);
       const [{ data: camps, error: e1 }, { data: capRows, error: e2 }, { data: dispRows }] = await Promise.all([
         supabase.from("campaigns").select("id,name,system,gm_id,share_code").order("created_at", { ascending: false }),
-        supabase.from("class_capabilities").select("class,subclass,capabilities"),
-        supabase.from("tpdi_responses").select("id,player_name,scores,assigned_character_id,respondent_id,created_at").not("player_name", "is", null).order("created_at", { ascending: false }),
+        supabase.from("class_capabilities").select("class,subclass,capabilities,partnered"),
+        supabase.from("tpdi_responses").select("id,player_name,scores,assigned_character_id,respondent_id,campaign_id,created_at").not("player_name", "is", null).order("created_at", { ascending: false }),
       ]);
       if (!active) return;
       if (e1) setErr(e1.message);
@@ -149,7 +152,26 @@ export default function GMWorkspace() {
       .update({ assigned_character_id: characterId || null, campaign_id: selected })
       .eq("id", responseId);
     if (error) setErr(error.message);
-    else setDispositions((ds) => ds.map((d) => (d.id === responseId ? { ...d, assigned_character_id: characterId || null } : d)));
+    else setDispositions((ds) => ds.map((d) => (d.id === responseId ? { ...d, assigned_character_id: characterId || null, campaign_id: selected } : d)));
+  }
+
+  // Pull an existing (unassigned) inventory into this campaign so it can be assigned.
+  async function importInventory(responseId: string) {
+    if (!selected || !responseId) return;
+    setErr(null);
+    const { error } = await supabase.from("tpdi_responses")
+      .update({ campaign_id: selected }).eq("id", responseId);
+    if (error) setErr(error.message);
+    else setDispositions((ds) => ds.map((d) => (d.id === responseId ? { ...d, campaign_id: selected } : d)));
+  }
+
+  async function deleteCampaign(id: string) {
+    if (!window.confirm("Delete this campaign and all its sessions, characters, events, recordings, and dispositions? Player inventories are unlinked but kept. This can't be undone.")) return;
+    setErr(null);
+    const { error } = await supabase.rpc("delete_campaign", { p_campaign: id });
+    if (error) { setErr(error.message); return; }
+    setCampaigns((cs) => cs.filter((c) => c.id !== id));
+    if (selected === id) { setSelected(null); setCharacters([]); }
   }
 
   // ---- coverage analysis (deterministic) ----
@@ -179,7 +201,7 @@ export default function GMWorkspace() {
     const suggestFor = (bucket: string) => {
       const classes: string[] = [];
       for (const r of caps) {
-        if ((r.capabilities || []).includes(bucket)) {
+        if ((r.capabilities || []).includes(bucket) && (!r.partnered || partneredOn)) {
           const label = r.subclass ? `${r.class} (${r.subclass})` : r.class;
           if (!classes.includes(label)) classes.push(label);
         }
@@ -194,7 +216,7 @@ export default function GMWorkspace() {
       contributors,
       suggestions,
     };
-  }, [characters, capIndex, caps]);
+  }, [characters, capIndex, caps, partneredOn]);
 
   // ---- render ----
   if (loading) return <Shell><p style={{ color: C.muted }}>Loading workspace...</p></Shell>;
@@ -228,17 +250,23 @@ export default function GMWorkspace() {
             value={newCampaign.name} onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })} />
           <select style={{ ...inputStyle, maxWidth: 120 }} value={newCampaign.system}
             onChange={(e) => setNewCampaign({ ...newCampaign, system: e.target.value })}>
-            <option value="5e">5e</option><option value="5.5e">5.5e</option>
+            <option value="2014">2014</option><option value="5e">5e</option><option value="5.5e">5.5e</option>
           </select>
           <button style={btn} onClick={createCampaign} disabled={busy}>Create</button>
         </div>
         {(() => {
           const sc = campaigns.find((c) => c.id === selected);
-          return sc && sc.share_code ? (
+          return sc ? (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12.5, color: C.muted }}>Player invite link:</span>
-              <code style={{ fontSize: 12.5, color: C.vellum, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 7, padding: "5px 9px" }}>/play?share={sc.share_code}</code>
-              <button style={btnGhost} onClick={() => copyInvite(sc.share_code)}>{copied === sc.share_code ? "Copied" : "Copy link"}</button>
+              {sc.share_code && <>
+                <span style={{ fontSize: 12.5, color: C.muted }}>Player invite link:</span>
+                <code style={{ fontSize: 12.5, color: C.vellum, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 7, padding: "5px 9px" }}>/play?share={sc.share_code}</code>
+                <button style={btnGhost} onClick={() => copyInvite(sc.share_code)}>{copied === sc.share_code ? "Copied" : "Copy link"}</button>
+              </>}
+              <button onClick={() => deleteCampaign(sc.id)}
+                style={{ marginLeft: "auto", background: "none", border: `1px solid ${C.line}`, color: C.muted, borderRadius: 9, padding: "9px 14px", fontSize: 12.5, cursor: "pointer" }}>
+                Delete campaign
+              </button>
             </div>
           ) : null;
         })()}
@@ -248,7 +276,13 @@ export default function GMWorkspace() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 18 }}>
           {/* roster */}
           <div style={box}>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>Party roster</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, color: C.muted }}>Party roster</span>
+              <label style={{ fontSize: 12.5, color: C.muted, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={partneredOn} onChange={(e) => setPartneredOn(e.target.checked)} />
+                Include partnered content
+              </label>
+            </div>
             {characters.length === 0 && <p style={{ color: C.muted, fontSize: 13 }}>No characters yet.</p>}
             {characters.map((ch) => (
               <div key={ch.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.line}` }}>
@@ -266,28 +300,30 @@ export default function GMWorkspace() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
               <input style={{ ...inputStyle, maxWidth: 150 }} placeholder="Name"
                 value={newChar.name} onChange={(e) => setNewChar({ ...newChar, name: e.target.value })} />
-              <select style={{ ...inputStyle, maxWidth: 140 }} value={newChar.class}
-                onChange={(e) => setNewChar({ ...newChar, class: e.target.value, subclass: "" })}>
-                <option value="">Class...</option>
-                {PHB_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <select style={{ ...inputStyle, maxWidth: 180 }} value={newChar.subclass}
-                disabled={!newChar.class}
-                onChange={(e) => setNewChar({ ...newChar, subclass: e.target.value })}>
-                <option value="">{newChar.class ? "Subclass (optional)" : "Pick class first"}</option>
+              <input style={{ ...inputStyle, maxWidth: 150 }} value={newChar.class}
+                list="class-options" placeholder="Class (any)"
+                onChange={(e) => setNewChar({ ...newChar, class: e.target.value, subclass: "" })} />
+              <datalist id="class-options">
+                {[...CORE_CLASSES, ...(partneredOn ? PARTNERED_CLASSES : [])].map((c) => <option key={c} value={c} />)}
+              </datalist>
+              <input style={{ ...inputStyle, maxWidth: 180 }} value={newChar.subclass}
+                list="subclass-options" placeholder="Subclass (any, optional)"
+                onChange={(e) => setNewChar({ ...newChar, subclass: e.target.value })} />
+              <datalist id="subclass-options">
                 {caps
-                  .filter((r) => r.class === newChar.class && r.subclass)
+                  .filter((r) => (!newChar.class || r.class === newChar.class) && r.subclass && (!r.partnered || partneredOn))
                   .map((r) => r.subclass)
                   .sort()
-                  .map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+                  .map((s) => <option key={s} value={s} />)}
+              </datalist>
               <input style={{ ...inputStyle, maxWidth: 70 }} placeholder="Lvl" type="number"
                 value={newChar.level} onChange={(e) => setNewChar({ ...newChar, level: e.target.value })} />
-              <select style={{ ...inputStyle, maxWidth: 150 }} value={newChar.species}
-                onChange={(e) => setNewChar({ ...newChar, species: e.target.value })}>
-                <option value="">Species (optional)</option>
-                {SPECIES.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
-              </select>
+              <input style={{ ...inputStyle, maxWidth: 150 }} value={newChar.species}
+                list="species-options" placeholder="Species (any, optional)"
+                onChange={(e) => setNewChar({ ...newChar, species: e.target.value })} />
+              <datalist id="species-options">
+                {[...CORE_SPECIES, ...(partneredOn ? PARTNERED_SPECIES : [])].map((sp) => <option key={sp} value={sp} />)}
+              </datalist>
               <button style={btn} onClick={addCharacter} disabled={busy}>Add</button>
             </div>
           </div>
@@ -335,15 +371,15 @@ export default function GMWorkspace() {
           {/* player dispositions */}
           <div style={box}>
             <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
-              Player dispositions <span style={{ color: C.line }}>· from your invite link</span>
+              Player dispositions <span style={{ color: C.line }}>· in this campaign</span>
             </div>
-            {dispositions.filter((d) => d.campaign_id === selected || d.campaign_id == null).length === 0 ? (
+            {dispositions.filter((d) => d.campaign_id === selected).length === 0 ? (
               <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>
-                None yet. Copy the invite link above and send it to your players. When they fill out the
-                inventory under their name, their profile shows up here to assign to a character.
+                None in this campaign yet. Send players their invite links (per character on the Roster page,
+                or the campaign link above). You can also pull in an existing inventory below.
               </p>
             ) : (
-              dispositions.filter((d) => d.campaign_id === selected || d.campaign_id == null).map((d) => {
+              dispositions.filter((d) => d.campaign_id === selected).map((d) => {
                 const leanings = (d.scores?.weights || []).slice(0, 2)
                   .map((w: any) => `${AXIS_LABEL[w.key] || w.key} ${Math.round((w.w || 0) * 100)}%`).join(", ");
                 return (
@@ -361,6 +397,21 @@ export default function GMWorkspace() {
                 );
               })
             )}
+
+            {/* import an existing inventory not yet in this campaign */}
+            {(() => {
+              const pool = dispositions.filter((d) => d.campaign_id !== selected && !d.assigned_character_id);
+              if (pool.length === 0) return null;
+              return (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}`, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, color: C.muted }}>Import an existing inventory:</span>
+                  <select style={{ ...inputStyle, maxWidth: 240 }} value="" onChange={(e) => importInventory(e.target.value)}>
+                    <option value="">— choose an inventory —</option>
+                    {pool.map((d) => <option key={d.id} value={d.id}>{d.player_name || "Unnamed"}</option>)}
+                  </select>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

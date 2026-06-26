@@ -18,6 +18,47 @@ type SegmentRow = {
   end_ms: number;
   text: string;
 };
+type Track = { id: string; job_id: string; campaign_id: string; character_id: string | null };
+
+type Admin = ReturnType<typeof createAdminClient>;
+
+// Decide the job's fate once every track has resolved. A track that transcribed
+// but produced no speech is "done", not an error, so a quiet player never sinks
+// the session. The job only errors when there is genuinely nothing to review,
+// and then it records why.
+async function finalizeJob(admin: Admin, jobId: string) {
+  const { data: tracks } = await admin
+    .from("audio_tracks")
+    .select("status")
+    .eq("job_id", jobId);
+  const all = (tracks as { status: string }[]) || [];
+
+  // still waiting on at least one track — let that track's callback finalize.
+  if (all.some((t) => t.status === "pending" || t.status === "transcribing")) return;
+
+  const { count } = await admin
+    .from("transcript_segments")
+    .select("*", { count: "exact", head: true })
+    .eq("job_id", jobId);
+  const segments = count || 0;
+  const errored = all.filter((t) => t.status === "error").length;
+
+  let status: string;
+  let error: string | null = null;
+  if (segments > 0) {
+    // at least one player produced a transcript — proceed, even if others were
+    // empty or failed.
+    status = "extracting";
+  } else if (errored === all.length && all.length > 0) {
+    status = "error";
+    error = "All tracks failed to transcribe.";
+  } else {
+    status = "error";
+    error = "No speech detected in any track. Check mic levels and re-record.";
+  }
+
+  await admin.from("capture_jobs").update({ status, error }).eq("id", jobId);
+}
 
 export async function POST(req: NextRequest) {
   const trackId = req.nextUrl.searchParams.get("track");
@@ -26,25 +67,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let body: DgBody;
-  try {
-    body = (await req.json()) as DgBody;
-  } catch {
-    return NextResponse.json({ error: "bad body" }, { status: 400 });
-  }
-
   const admin = createAdminClient();
-  const { data: track } = await admin
+
+  const { data: trackRow } = await admin
     .from("audio_tracks")
     .select("id, job_id, campaign_id, character_id")
     .eq("id", trackId)
     .single();
-  if (!track) return NextResponse.json({ error: "unknown track" }, { status: 404 });
+  if (!trackRow) return NextResponse.json({ error: "unknown track" }, { status: 404 });
+  const t = trackRow as Track;
 
-  const t = track as { id: string; job_id: string; campaign_id: string; character_id: string | null };
+  // Mark a track failed, then re-check the job. Return 200 so Deepgram doesn't
+  // retry; the failure is captured in the track + job state, not the HTTP code.
+  async function failTrack(): Promise<NextResponse> {
+    await admin.from("audio_tracks").update({ status: "error" }).eq("id", t.id);
+    await finalizeJob(admin, t.job_id);
+    return NextResponse.json({ ok: true });
+  }
+
+  let body: DgBody;
+  try {
+    body = (await req.json()) as DgBody;
+  } catch {
+    return failTrack();
+  }
+
+  // Build segment rows from utterances, falling back to the whole-channel transcript.
   const utterances = body.results?.utterances || [];
   let rows: SegmentRow[] = [];
-
   if (utterances.length) {
     rows = utterances
       .filter((u) => (u.transcript || "").trim().length > 0)
@@ -72,25 +122,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (rows.length) await admin.from("transcript_segments").insert(rows);
-  await admin.from("audio_tracks").update({ status: rows.length ? "done" : "error" }).eq("id", t.id);
-
-  // When no track is still pending or transcribing, the job is done capturing.
-  const { data: remaining } = await admin
-    .from("audio_tracks")
-    .select("id")
-    .eq("job_id", t.job_id)
-    .in("status", ["pending", "transcribing"]);
-
-  if (!remaining || remaining.length === 0) {
-    const { data: anyErr } = await admin
-      .from("audio_tracks")
-      .select("id")
-      .eq("job_id", t.job_id)
-      .eq("status", "error");
-    const nextStatus = anyErr && anyErr.length ? "error" : "extracting";
-    await admin.from("capture_jobs").update({ status: nextStatus }).eq("id", t.job_id);
+  // Insert is checked: a silent DB failure must not masquerade as success.
+  if (rows.length) {
+    const { error: insErr } = await admin.from("transcript_segments").insert(rows);
+    if (insErr) return failTrack();
   }
+
+  // Empty-but-valid (no speech) is "done", not an error. Only real failures above
+  // mark a track error.
+  await admin.from("audio_tracks").update({ status: "done" }).eq("id", t.id);
+  await finalizeJob(admin, t.job_id);
 
   return NextResponse.json({ ok: true });
 }

@@ -311,7 +311,17 @@ export default function TPDI() {
         {phase === "intro" && (
           <div className="tpdi-fade">
             <div style={{ position: "relative", height: 240, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
-              <Astrolabe size={240} spin={!reduce} />
+              <img
+                src="/astrolabe.png"
+                alt=""
+                draggable={false}
+                style={{
+                  width: 240,
+                  height: 240,
+                  transformOrigin: "center",
+                  animation: reduce ? "none" : "tpdi-spin 90s linear infinite",
+                }}
+              />
             </div>
 
             <h1 className="tpdi-serif" style={{ fontSize: 40, lineHeight: 1.08, fontWeight: 600, margin: "8px 0 16px" }}>

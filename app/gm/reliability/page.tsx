@@ -2,11 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426", surface: "#251B33", surface2: "#2F2340", line: "#3D2F52",
-  text: "#F4EEFA", muted: "#A597BD", sun: "#F4C430", plum: "#9B7BD4", warn: "#E07A5F", good: "#5DBE9A",
+  bg: SAX.ink, surface: SAX.slateBg, surface2: "rgba(11,7,18,0.6)", line: SAX.line,
+  text: SAX.text, muted: SAX.muted, sun: SAX.sun, plum: SAX.plum, warn: SAX.warn, good: SAX.good,
 };
 
 const AXIS: Record<string, { label: string; color: string }> = {
@@ -184,7 +185,7 @@ export default function ReliabilityPage() {
     return { ready: true, needRecode: false, N, po, kappa, flaggedN: U.size, flaggedAgree: agreeU, cats, M };
   }, [segN, codingA, codingB, labels]);
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20, marginBottom: 18 } as const;
+  const box = { ...surfaces.slate, padding: 20, marginBottom: 18 } as const;
 
   const Bar = ({ rate }: { rate: number }) => (
     <div style={{ flex: 1, height: 8, background: C.surface2, borderRadius: 8, overflow: "hidden", minWidth: 60 }}>
@@ -206,14 +207,11 @@ export default function ReliabilityPage() {
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Reliability</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
-          How well the extractor codes. Precision and calibration come from your review decisions; the agreement section double-codes a session and compares the two passes.
-        </p>
+    <PageShell width={880}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Reliability</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
+        How well the extractor codes. Precision and calibration come from your review decisions; the agreement section double-codes a session and compares the two passes.
+      </p>
 
         <div style={box}>
           <label style={{ fontSize: 12, color: C.muted, fontFamily: "ui-monospace, monospace", letterSpacing: "0.1em" }}>CAMPAIGN</label>
@@ -310,7 +308,7 @@ export default function ReliabilityPage() {
                   {jobs.map((j) => (<option key={j.id} value={j.id}>Session {j.session?.session_number ?? "?"} ({j.status})</option>))}
                 </select>
                 <button type="button" onClick={runRecode} disabled={recoding || !jobId}
-                  style={{ background: C.plum, color: "#1B1426", border: "none", borderRadius: 9, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: recoding ? "default" : "pointer", opacity: recoding ? 0.7 : 1 }}>
+                  style={{ background: C.plum, color: SAX.inkDeep, border: "none", borderRadius: 9, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: recoding ? "default" : "pointer", opacity: recoding ? 0.7 : 1 }}>
                   {recoding ? "Coding…" : agree.needRecode ? "Run second coding" : "Re-run second coding"}
                 </button>
               </div>
@@ -382,7 +380,6 @@ export default function ReliabilityPage() {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

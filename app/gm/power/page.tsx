@@ -5,55 +5,34 @@ import { createClient } from "@/lib/supabase/client";
 import WranglerNav from "@/components/wrangler-nav";
 
 /* Wrangler — the Power Room.
-   A standalone engine-room page. The DM throws the breaker to bring the
-   disposition engine to life. The switch is honest about state: it only latches
-   while a fit is genuinely running, only flashes "alive" when the run row says
-   done, and snaps to a fault when it errors.
-
-   Visuals are layered: a painted base plate (breaker-base.png), an arc/glow
-   plate (breaker-alive.png) faded in while live, and on top an SVG handle whose
-   two copper blades pivot about their own top hinges (so both lift evenly) and
-   seat onto the fuse contacts when thrown. The handle is drawn over the arc
-   layer so it stays visible while the engine runs. */
+   The DM throws a wall-mounted breaker to bring the disposition engine to life.
+   The switch is a flipbook of pre-rendered frames: the lever travels from OPEN
+   (top) to CLOSE (bottom) as you drag down or hit the button, then two alive
+   frames alternate to crackle while the cloud fit runs. The state machine stays
+   honest: it only latches while a fit is genuinely running, flashes alive when
+   the run row says done, and snaps back open on error. */
 
 const C = {
-  bg: "#140E1F", room: "#1B1426", stone: "#241A33", stone2: "#2D2140",
-  line: "#3D2F52", text: "#F4EEFA", muted: "#A597BD",
-  brass: "#C8A24B", brassDim: "#7A632E", copper: "#B5763A",
-  spark: "#BFE3FF", sun: "#F4C430", plum: "#9B7BD4", warn: "#E07A5F", good: "#5DBE9A",
+  bg: "#0D0916", room: "#1B1426", stone: "#241A33", line: "#3D2F52",
+  text: "#F4EEFA", muted: "#A597BD", brass: "#C8A24B", plum: "#9B7BD4",
+  warn: "#E07A5F", good: "#5DBE9A", sun: "#F4C430", ember: "#E8923A",
 };
 
 type Phase = "dormant" | "arming" | "animating" | "alive" | "fault";
 type Campaign = { id: string; name: string };
 
-const PULL_PX = 200;     // drag distance for a full throw
-const COMMIT = 0.8;      // fraction past which the switch latches
+const PULL_PX = 200;   // drag distance for a full throw
+const COMMIT = 0.8;    // fraction past which the switch latches
 
-/* handle geometry, in the 1024x1024 base frame */
-const OPEN_ANGLE = 36;   // blade swing (deg) when dormant; 0 = seated
-const HINGE_Y = 182;     // the two top hinge pins sit here
-const HINGE_LX = 358;    // left pole / left hinge x
-const HINGE_RX = 662;    // right pole / right hinge x
-const MID_X = (HINGE_LX + HINGE_RX) / 2;
-const CROSS_D = 34;      // crossbar sits this far below the hinge line
-const BLADE_LEN = 326;   // hinge to contact tip
-
-/* one copper blade arm with its forked contact tip, drawn straight down from the
-   hinge; the parent <g> rotates it about that hinge */
-function Blade({ cx }: { cx: number }) {
-  const x = cx - 17;
-  const tipY = HINGE_Y + BLADE_LEN - 16;
-  return (
-    <g>
-      <rect x={x} y={HINGE_Y} width={34} height={BLADE_LEN} rx={4} fill="url(#hCopper)" stroke="#1a1119" strokeWidth={2} />
-      <rect x={x} y={HINGE_Y} width={34} height={BLADE_LEN} rx={4} fill="url(#hHeat)" />
-      <rect x={cx - 13} y={HINGE_Y + 4} width={5} height={BLADE_LEN - 8} fill="#f0c98a" opacity={0.45} />
-      <rect x={cx - 24} y={tipY} width={11} height={32} rx={3} fill="url(#hCopper)" stroke="#1a1119" strokeWidth={2} />
-      <rect x={cx + 13} y={tipY} width={11} height={32} rx={3} fill="url(#hCopper)" stroke="#1a1119" strokeWidth={2} />
-      <rect x={cx - 24} y={tipY - 2} width={48} height={13} rx={3} fill="url(#hCopper)" stroke="#1a1119" strokeWidth={2} />
-    </g>
-  );
-}
+// lever flipbook, OPEN (top) to CLOSE (bottom)
+const FRAMES = [
+  "/breaker-open.png",
+  "/breaker-1.png",
+  "/breaker-2.png",
+  "/breaker-3.png",
+  "/breaker-closed.png",
+];
+const ALIVE = ["/breaker-alive-1.png", "/breaker-alive-2.png"];
 
 export default function PowerRoomPage() {
   const supabase = createClient();
@@ -61,13 +40,21 @@ export default function PowerRoomPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState<string>("");
   const [phase, setPhase] = useState<Phase>("dormant");
-  const [pull, setPull] = useState(0);          // 0 = open (up), 1 = seated (down)
+  const [pull, setPull] = useState(0);          // 0 = open (top), 1 = closed (seated)
   const [fault, setFault] = useState<string>("");
 
   const runIdRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dragStartY = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  /* preload every frame so the flipbook never flickers mid-drag */
+  useEffect(() => {
+    [...FRAMES, ...ALIVE].forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, []);
 
   /* ---- load campaigns, and resume a fit already in progress -------------- */
   useEffect(() => {
@@ -83,7 +70,6 @@ export default function PowerRoomPage() {
 
   useEffect(() => {
     if (!campaignId) return;
-    // If a fit is already running for this campaign, latch and resume.
     (async () => {
       const { data } = await supabase
         .from("disposition_runs")
@@ -95,7 +81,7 @@ export default function PowerRoomPage() {
       const fresh = latest && Date.now() - new Date(latest.created_at).getTime() < 30 * 60 * 1000;
       if (latest && latest.status === "fitting" && fresh) {
         runIdRef.current = latest.id;
-        animatePull(1);
+        setPull(1);
         setPhase("animating");
         startPoll();
       } else {
@@ -109,12 +95,12 @@ export default function PowerRoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaignId]);
 
-  /* ---- spring/latch the handle to a target pull ------------------------- */
+  /* ---- spring the lever to a target, flipping frames as it travels ------- */
   const animatePull = useCallback((target: number, then?: () => void) => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     const step = () => {
       setPull((p) => {
-        const next = p + (target - p) * 0.22;
+        const next = p + (target - p) * 0.18;
         if (Math.abs(target - next) < 0.004) {
           rafRef.current = null;
           then?.();
@@ -147,9 +133,7 @@ export default function PowerRoomPage() {
       if (row.status === "done") {
         stopPoll();
         setPhase("alive");
-        setTimeout(() => {
-          animatePull(0, () => setPhase("dormant"));
-        }, 3600);
+        setTimeout(() => animatePull(0, () => setPhase("dormant")), 3600);
       } else if (row.status === "error") {
         stopPoll();
         setFault(row.error || "The engine faulted during the fit.");
@@ -162,7 +146,7 @@ export default function PowerRoomPage() {
   /* ---- throwing the switch --------------------------------------------- */
   const engage = useCallback(async () => {
     setPhase("animating");
-    animatePull(1);
+    animatePull(1);                  // lever travels the rest of the way to CLOSE
     try {
       const res = await fetch("/api/dispositions/run", {
         method: "POST",
@@ -214,25 +198,22 @@ export default function PowerRoomPage() {
     });
   };
 
-  // Keyboard / reduced-motion fallback: a plain throw.
+  // Button / keyboard fallback: auto-throw and fire.
   const throwIt = () => {
     if (!canThrow || !campaignId) return;
     setFault("");
     engage();
   };
 
-  /* ---- derived handle geometry ------------------------------------------ */
-  const angle = OPEN_ANGLE * (1 - pull);        // 0 = seated (blades down on fuses)
-  const t = (angle * Math.PI) / 180;
-  const ccx = MID_X - CROSS_D * Math.sin(t);    // crossbar center follows the blades
-  const ccy = HINGE_Y + CROSS_D * Math.cos(t);
-  const bx = ccx;                               // ball sits above the crossbar
-  const by = ccy - 96;
+  /* ---- which frame to show --------------------------------------------- */
+  const seated = pull > 0.985;
   const live = phase === "animating" || phase === "alive";
+  const showAlive = live && seated;
+  const frameIdx = Math.round(pull * (FRAMES.length - 1));
 
   const plate = {
-    dormant: { big: "Dormant", sub: "Pull the switch to animate the engine." },
-    arming: { big: "…", sub: "Throw it all the way down." },
+    dormant: { big: "Dormant", sub: "Pull the lever down, or hit the switch." },
+    arming: { big: "…", sub: "Drag it all the way to CLOSE." },
     animating: { big: "Animating", sub: "The engine is fitting. Hold tight." },
     alive: { big: "It's alive!", sub: "Dispositions updated." },
     fault: { big: "Fault", sub: fault },
@@ -254,12 +235,7 @@ export default function PowerRoomPage() {
           </div>
           <label style={S.pick}>
             <span style={S.pickLabel}>Campaign</span>
-            <select
-              value={campaignId}
-              onChange={(e) => setCampaignId(e.target.value)}
-              style={S.select}
-              disabled={live}
-            >
+            <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} style={S.select} disabled={live}>
               {campaigns.length === 0 && <option value="">No campaigns</option>}
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -269,104 +245,42 @@ export default function PowerRoomPage() {
         </header>
 
         <div style={S.stage}>
-          {/* the breaker: painted base, arc/glow plate, then the SVG handle on top */}
-          <div style={S.breakerWrap}>
-            <img src="/breaker-base.png" alt="" draggable={false} style={S.layerImg} />
-
-            <img
-              src="/breaker-alive.png"
-              alt=""
-              draggable={false}
-              className={live ? "alive-on" : undefined}
-              style={{ ...S.layerImg, opacity: live ? 1 : 0, transition: "opacity 0.3s ease" }}
-            />
-
-            <svg viewBox="0 0 1024 1024" style={S.handleSvg} role="img"
-                 aria-label="Breaker switch that starts a disposition fit">
-              <defs>
-                <radialGradient id="hBake" cx="40%" cy="32%" r="75%">
-                  <stop offset="0%" stopColor="#4a4350" />
-                  <stop offset="45%" stopColor="#211d28" />
-                  <stop offset="100%" stopColor="#0c0a10" />
-                </radialGradient>
-                <linearGradient id="hCopper" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#5d3a1e" />
-                  <stop offset="30%" stopColor="#c98a4e" />
-                  <stop offset="50%" stopColor="#e6ad6a" />
-                  <stop offset="70%" stopColor="#a86a35" />
-                  <stop offset="100%" stopColor="#4f3219" />
-                </linearGradient>
-                <linearGradient id="hBrass" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#6e571f" />
-                  <stop offset="45%" stopColor="#d9bd63" />
-                  <stop offset="60%" stopColor="#e8d27e" />
-                  <stop offset="100%" stopColor="#5f4b1a" />
-                </linearGradient>
-                <linearGradient id="hIron" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3a3543" />
-                  <stop offset="50%" stopColor="#211e28" />
-                  <stop offset="100%" stopColor="#100e15" />
-                </linearGradient>
-                <linearGradient id="hHeat" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#6f86a0" stopOpacity={0} />
-                  <stop offset="50%" stopColor="#7f93a6" stopOpacity={0.18} />
-                  <stop offset="100%" stopColor="#6f86a0" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-
-              {/* fixed hinge pins (the blades pivot about these) */}
-              <circle cx={HINGE_LX} cy={HINGE_Y} r={16} fill="url(#hBrass)" stroke="#0c0a10" strokeWidth={2} />
-              <circle cx={HINGE_LX} cy={HINGE_Y} r={5} fill="#2c230d" />
-              <circle cx={HINGE_RX} cy={HINGE_Y} r={16} fill="url(#hBrass)" stroke="#0c0a10" strokeWidth={2} />
-              <circle cx={HINGE_RX} cy={HINGE_Y} r={5} fill="#2c230d" />
-
-              {/* blades, each rotating about its own hinge */}
-              <g transform={`rotate(${angle} ${HINGE_LX} ${HINGE_Y})`}><Blade cx={HINGE_LX} /></g>
-              <g transform={`rotate(${angle} ${HINGE_RX} ${HINGE_Y})`}><Blade cx={HINGE_RX} /></g>
-
-              {/* crossbar (stays horizontal, rides up with the blades) */}
-              <rect x={ccx - 162} y={ccy - 13} width={324} height={26} rx={9} fill="url(#hIron)" stroke="#0c0a10" strokeWidth={2} />
-              <rect x={ccx - 156} y={ccy - 9} width={312} height={5} rx={2} fill="#534e5e" opacity={0.7} />
-
-              {/* neck + bakelite ball */}
-              <rect x={bx - 12} y={by} width={24} height={ccy - by - 8} rx={6} fill="url(#hBake)" stroke="#0c0a10" strokeWidth={2} />
-              <circle cx={bx} cy={by} r={46} fill="url(#hBake)" stroke="#0c0a10" strokeWidth={2} />
-              <ellipse cx={bx - 15} cy={by - 17} rx={16} ry={11} fill="#6f6878" opacity={0.6} />
-
-              {/* drag target over the ball */}
-              <circle
-                cx={bx} cy={by} r={88} fill="transparent"
-                onPointerDown={onDown} onPointerMove={onMove}
-                onPointerUp={onUp} onPointerCancel={onUp}
-                style={{ pointerEvents: "all", cursor: canThrow ? "grab" : "default", touchAction: "none" }}
-              />
-
-              {/* throw-progress hint while arming */}
-              {phase === "arming" && (
-                <g>
-                  <rect x={764} y={230} width={16} height={280} rx={8} fill="#0c0814" />
-                  <rect x={764} y={230 + 280 * (1 - pull)} width={16} height={280 * pull} rx={8}
-                        fill={pull >= COMMIT ? C.good : C.sun} />
-                </g>
+          {/* breaker on the wall, with a glow that swells when live */}
+          <div style={S.breakerStage}>
+            <div style={{ ...S.glow, opacity: showAlive ? 1 : live ? 0.7 : 0.28 }} />
+            <div
+              style={{ ...S.breakerWrap, cursor: canThrow ? "grab" : "default" }}
+              onPointerDown={onDown}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerCancel={onUp}
+              role="img"
+              aria-label={`Breaker switch, ${seated ? "closed" : "open"}`}
+            >
+              {showAlive ? (
+                <>
+                  <img src={ALIVE[0]} alt="" draggable={false} className="alive-a" style={S.layerImg} />
+                  <img src={ALIVE[1]} alt="" draggable={false} className="alive-b" style={S.layerImg} />
+                </>
+              ) : (
+                <img src={FRAMES[frameIdx]} alt="" draggable={false} style={S.layerImg} />
               )}
-            </svg>
+            </div>
           </div>
 
           {/* status plate */}
           <div style={{ ...S.plate, borderColor: phase === "fault" ? C.warn : C.line }}>
-            <div style={{
-              ...S.plateBig,
-              color: phase === "alive" ? C.sun : phase === "fault" ? C.warn : C.text,
-            }} className={phase === "alive" ? "alivePulse" : undefined}>
+            <div
+              style={{ ...S.plateBig, color: phase === "alive" ? C.sun : phase === "fault" ? C.warn : C.text }}
+              className={phase === "alive" ? "alivePulse" : undefined}
+            >
               {plate.big}
             </div>
             <div style={S.plateSub}>{plate.sub}</div>
-            {campaignName && phase !== "fault" && (
-              <div style={S.plateMeta}>{campaignName}</div>
-            )}
+            {campaignName && phase !== "fault" && <div style={S.plateMeta}>{campaignName}</div>}
           </div>
 
-          {/* accessible / keyboard throw */}
+          {/* button throw */}
           <button onClick={throwIt} disabled={!canThrow || !campaignId} style={{
             ...S.throwBtn,
             opacity: canThrow && campaignId ? 1 : 0.5,
@@ -375,9 +289,7 @@ export default function PowerRoomPage() {
             {phase === "animating" ? "Animating…" : "Throw the switch"}
           </button>
 
-          {phase === "alive" && (
-            <a href="/gm/dispositions" style={S.link}>View dispositions →</a>
-          )}
+          {phase === "alive" && <a href="/gm/dispositions" style={S.link}>View dispositions →</a>}
         </div>
       </div>
     </div>
@@ -385,14 +297,25 @@ export default function PowerRoomPage() {
 }
 
 /* ----------------------------------------------------------------------- */
+const WALL =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E\")";
+
 const S: Record<string, React.CSSProperties> = {
   room: {
-    minHeight: "100dvh", background: `radial-gradient(circle at 50% 30%, ${C.room}, ${C.bg})`,
-    color: C.text, fontFamily: "'Iowan Old Style', Georgia, serif",
+    minHeight: "100dvh", color: C.text,
+    fontFamily: "'Iowan Old Style', Georgia, serif",
+    backgroundColor: C.bg,
+    backgroundImage: [
+      WALL,
+      "radial-gradient(ellipse 90% 55% at 50% -8%, rgba(74,54,98,0.40), transparent 70%)",
+      "radial-gradient(ellipse 120% 70% at 50% 118%, rgba(8,5,14,0.92), transparent 60%)",
+      "linear-gradient(180deg, #241B33, #120C1E 70%, #0B0714)",
+    ].join(","),
+    backgroundAttachment: "fixed",
   },
-  shell: { maxWidth: 820, margin: "0 auto", padding: "32px 20px 60px" },
+  shell: { maxWidth: 820, margin: "0 auto", padding: "32px 20px 64px" },
   header: {
-    margin: "0 auto 8px", display: "flex",
+    margin: "0 auto 6px", display: "flex",
     alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap",
   },
   eyebrow: {
@@ -410,24 +333,29 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: 8, padding: "8px 12px", fontSize: 14, minWidth: 220,
     fontFamily: "'Iowan Old Style', Georgia, serif",
   },
-  stage: { maxWidth: 460, margin: "10px auto 0", display: "flex", flexDirection: "column", alignItems: "center" },
+  stage: { maxWidth: 460, margin: "14px auto 0", display: "flex", flexDirection: "column", alignItems: "center" },
 
+  breakerStage: { position: "relative", width: "100%", display: "flex", justifyContent: "center", padding: "8px 0" },
+  glow: {
+    position: "absolute", top: "50%", left: "50%", width: "78%", height: "70%",
+    transform: "translate(-50%, -50%)", borderRadius: "50%", pointerEvents: "none",
+    background: `radial-gradient(ellipse at center, ${C.ember} 0%, rgba(232,146,58,0.35) 35%, transparent 70%)`,
+    filter: "blur(26px)", transition: "opacity 0.35s ease",
+  },
   breakerWrap: {
-    position: "relative", width: "min(330px, 80vw)", aspectRatio: "1 / 1",
-    margin: "0 auto", overflow: "visible", touchAction: "none", userSelect: "none",
+    position: "relative", width: "min(340px, 84vw)", aspectRatio: "1792 / 2338",
+    touchAction: "none", userSelect: "none",
   },
   layerImg: {
     position: "absolute", inset: 0, width: "100%", height: "100%",
     objectFit: "contain", userSelect: "none", pointerEvents: "none",
-  },
-  handleSvg: {
-    position: "absolute", inset: 0, width: "100%", height: "100%",
-    overflow: "visible", pointerEvents: "none",
+    filter: "drop-shadow(0 18px 30px rgba(0,0,0,0.55))",
   },
 
   plate: {
-    marginTop: 14, width: "100%", maxWidth: 380, textAlign: "center",
-    background: C.stone, border: `1px solid ${C.line}`, borderRadius: 12, padding: "16px 18px",
+    marginTop: 10, width: "100%", maxWidth: 380, textAlign: "center",
+    background: "rgba(36,27,51,0.78)", border: `1px solid ${C.line}`, borderRadius: 12,
+    padding: "16px 18px", backdropFilter: "blur(2px)",
   },
   plateBig: { fontSize: 26, fontWeight: 700, letterSpacing: 0.3 },
   plateSub: { marginTop: 6, fontSize: 14, color: C.muted, minHeight: 20 },
@@ -438,18 +366,20 @@ const S: Record<string, React.CSSProperties> = {
   throwBtn: {
     marginTop: 18, background: "transparent", color: C.brass,
     border: `1px solid ${C.brass}`, borderRadius: 999, padding: "10px 22px",
-    fontFamily: "ui-monospace, monospace", fontSize: 12, letterSpacing: 1.5,
-    textTransform: "uppercase",
+    fontFamily: "ui-monospace, monospace", fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase",
   },
   link: { marginTop: 14, color: C.plum, fontSize: 14, textDecoration: "none", borderBottom: `1px solid ${C.plum}` },
 };
 
 const CSS = `
+  .alive-a, .alive-b { will-change: opacity; }
   @media (prefers-reduced-motion: no-preference) {
-    .alive-on { animation: flicker 1.4s ease-in-out infinite; }
+    .alive-a { animation: aflipA 0.22s steps(1, end) infinite; }
+    .alive-b { animation: aflipB 0.22s steps(1, end) infinite; }
     .alivePulse { animation: alive 0.5s ease-out 3; }
   }
-  @keyframes flicker { 0%,100%{opacity:.82} 45%{opacity:1} 60%{opacity:.66} 78%{opacity:.96} }
-  @keyframes alive { 0%{transform:scale(1)} 40%{transform:scale(1.12)} 100%{transform:scale(1)} }
+  @keyframes aflipA { 0%, 49.9% { opacity: 1 } 50%, 100% { opacity: 0 } }
+  @keyframes aflipB { 0%, 49.9% { opacity: 0 } 50%, 100% { opacity: 1 } }
+  @keyframes alive { 0% { transform: scale(1) } 40% { transform: scale(1.12) } 100% { transform: scale(1) } }
   select:focus, button:focus, a:focus { outline: 2px solid ${C.brass}; outline-offset: 2px; }
 `;

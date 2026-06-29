@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { SAX } from "@/lib/theme";
+import LogoutButton from "@/components/logout-button";
 
 /* Six Axes — top navigation.
    GM side is grouped into five sections plus standalone Power and Inventory.
@@ -50,6 +51,7 @@ const NAV_CSS = `
 .sax-nav{padding-bottom:14px;margin-bottom:26px;border-bottom:1px solid ${SAX.line};
   font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
 .sax-top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.sax-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
 .sax-brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
 .sax-mark{width:30px;height:30px;opacity:.92;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));}
 .sax-word{font-family:${SAX.serif};font-size:23px;font-weight:600;color:${SAX.text};letter-spacing:-0.01em;line-height:1;}
@@ -113,14 +115,17 @@ export default function SixAxesNav() {
           <img className="sax-mark" src="/astrolabe.png" alt="" />
           <span><span className="sax-word">Six Axes</span><span className="sax-tag">run the table</span></span>
         </a>
-        <nav className="sax-grp">
-          {GROUPS.map((g) => {
-            const on = active?.label === g.label;
-            return (
-              <a key={g.label} className={`sax-glink${on ? " on" : ""}`} href={g.href}>{g.label}</a>
-            );
-          })}
-        </nav>
+        <div className="sax-right">
+          <nav className="sax-grp">
+            {GROUPS.map((g) => {
+              const on = active?.label === g.label;
+              return (
+                <a key={g.label} className={`sax-glink${on ? " on" : ""}`} href={g.href}>{g.label}</a>
+              );
+            })}
+          </nav>
+          <LogoutButton />
+        </div>
       </div>
 
       {active?.children && (

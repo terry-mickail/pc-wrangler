@@ -2,20 +2,21 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
   sunSoft: "#FFD75E",
-  plum: "#9B7BD4",
-  warn: "#E07A5F",
-  good: "#5DBE9A",
+  plum: SAX.plum,
+  warn: SAX.warn,
+  good: SAX.good,
 };
 
 type Msg = { id: string; author_profile: string; display_name: string | null; body: string; created_at: string };
@@ -112,14 +113,11 @@ export default function ChatPage() {
   }
 
   const fmt = (iso: string): string => { try { return new Date(iso).toLocaleString(); } catch (e) { return iso; } };
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 } as const;
+  const box = { ...surfaces.slate, padding: 18 } as const;
   const input = { boxSizing: "border-box" as const, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", fontSize: 14, outline: "none" };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px 50px" }}>
-        <WranglerNav />
-
+    <PageShell width={720}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
           <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 26, margin: "8px 0 0" }}>Party chat</h1>
           {campaignName && <span style={{ fontSize: 12, color: C.muted, fontFamily: "ui-monospace, monospace", letterSpacing: "0.12em" }}>{campaignName.toUpperCase()}</span>}
@@ -158,7 +156,7 @@ export default function ChatPage() {
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ ...input, width: "100%", marginBottom: 8 }} />
               <div style={{ display: "flex", gap: 8 }}>
                 <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} placeholder="Message the party…" style={{ ...input, flex: 1 }} />
-                <button type="button" onClick={send} disabled={sending || !draft.trim()} style={{ background: C.sun, color: "#1B1426", border: "none", borderRadius: 9, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: sending || !draft.trim() ? "default" : "pointer", opacity: sending || !draft.trim() ? 0.6 : 1 }}>Send</button>
+                <button type="button" onClick={send} disabled={sending || !draft.trim()} style={{ background: C.sun, color: SAX.inkDeep, border: "none", borderRadius: 9, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: sending || !draft.trim() ? "default" : "pointer", opacity: sending || !draft.trim() ? 0.6 : 1 }}>Send</button>
               </div>
             </div>
 
@@ -182,7 +180,7 @@ export default function ChatPage() {
                   <label style={{ fontSize: 12, color: C.muted }}>To
                     <input type="datetime-local" value={gTo} onChange={(e) => setGTo(e.target.value)} style={{ ...input, width: "100%", marginTop: 4, colorScheme: "dark" }} />
                   </label>
-                  <button type="button" onClick={grant} disabled={!gFrom || !gTo} style={{ background: C.good, color: "#1B1426", border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: gFrom && gTo ? "pointer" : "default", opacity: gFrom && gTo ? 1 : 0.6, justifySelf: "start" }}>Grant this window</button>
+                  <button type="button" onClick={grant} disabled={!gFrom || !gTo} style={{ background: C.good, color: SAX.inkDeep, border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: gFrom && gTo ? "pointer" : "default", opacity: gFrom && gTo ? 1 : 0.6, justifySelf: "start" }}>Grant this window</button>
                 </div>
               )}
 
@@ -201,7 +199,6 @@ export default function ChatPage() {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

@@ -2,11 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426", surface: "#251B33", surface2: "#2F2340", line: "#3D2F52",
-  text: "#F4EEFA", muted: "#A597BD", sun: "#F4C430", plum: "#9B7BD4", warn: "#E07A5F", good: "#5DBE9A",
+  bg: SAX.ink, surface: SAX.slateBg, surface2: "rgba(11,7,18,0.6)", line: SAX.line,
+  text: SAX.text, muted: SAX.muted, sun: SAX.sun, plum: SAX.plum, warn: SAX.warn, good: SAX.good,
 };
 
 const AXIS: Record<string, { label: string; color: string }> = {
@@ -138,18 +139,15 @@ export default function ReviewPage() {
     loadJobs(campaignId);
   }
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20, marginBottom: 18 } as const;
+  const box = { ...surfaces.slate, padding: 20, marginBottom: 18 } as const;
   const btn = (bg: string, fg: string) => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" } as const);
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Review</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
-          Claude reads the transcript and proposes events. Nothing counts until you accept it into the spine.
-        </p>
+    <PageShell width={900}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Review</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
+        Claude reads the transcript and proposes events. Nothing counts until you accept it into the spine.
+      </p>
 
         <div style={box}>
           <label style={{ fontSize: 12, color: C.muted, fontFamily: "ui-monospace, monospace", letterSpacing: "0.1em" }}>CAMPAIGN</label>
@@ -177,12 +175,12 @@ export default function ReviewPage() {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {job.status === "extracting" && (
-                    <button type="button" onClick={runExtraction} disabled={running} style={{ ...btn(C.plum, "#1B1426"), opacity: running ? 0.7 : 1 }}>
+                    <button type="button" onClick={runExtraction} disabled={running} style={{ ...btn(C.plum, SAX.inkDeep), opacity: running ? 0.7 : 1 }}>
                       {running ? "Extracting…" : "Run extraction"}
                     </button>
                   )}
-                  {props.length > 0 && <button type="button" onClick={acceptAll} disabled={busy} style={{ ...btn(C.good, "#1B1426"), opacity: busy ? 0.7 : 1 }}>Accept all</button>}
-                  {job.status === "review" && props.length === 0 && <button type="button" onClick={markDone} style={btn(C.sun, "#1B1426")}>Mark done</button>}
+                  {props.length > 0 && <button type="button" onClick={acceptAll} disabled={busy} style={{ ...btn(C.good, SAX.inkDeep), opacity: busy ? 0.7 : 1 }}>Accept all</button>}
+                  {job.status === "review" && props.length === 0 && <button type="button" onClick={markDone} style={btn(C.sun, SAX.inkDeep)}>Mark done</button>}
                 </div>
               </div>
               {running && progress && (
@@ -211,7 +209,7 @@ export default function ReviewPage() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 15, fontWeight: 700 }}>{p.character?.name || "GM / Narrator"}</span>
                           <span style={{ fontSize: 13, color: C.muted }}>{labels[p.event_type] || p.event_type}</span>
-                          {ax && <span style={{ fontSize: 11, fontWeight: 700, color: "#1B1426", background: ax.color, padding: "2px 8px", borderRadius: 999 }}>{ax.label}</span>}
+                          {ax && <span style={{ fontSize: 11, fontWeight: 700, color: SAX.inkDeep, background: ax.color, padding: "2px 8px", borderRadius: 999 }}>{ax.label}</span>}
                           {p.frame && <span style={{ fontSize: 11, color: C.muted, fontFamily: "ui-monospace, monospace" }}>{p.frame}</span>}
                         </div>
                         {conf !== null && <span style={{ fontSize: 13, fontWeight: 700, color: conf >= 70 ? C.good : conf >= 40 ? C.sun : C.warn }}>{conf}%</span>}
@@ -226,7 +224,7 @@ export default function ReviewPage() {
                       {p.rationale && <div style={{ fontSize: 12.5, color: C.muted, marginTop: 8, fontStyle: "italic" }}>{p.rationale}</div>}
 
                       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                        <button type="button" onClick={() => review(p.id, true)} disabled={busy} style={btn(C.good, "#1B1426")}>Accept</button>
+                        <button type="button" onClick={() => review(p.id, true)} disabled={busy} style={btn(C.good, SAX.inkDeep)}>Accept</button>
                         <button type="button" onClick={() => review(p.id, false)} disabled={busy} style={{ background: "transparent", color: C.warn, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Reject</button>
                       </div>
                     </div>
@@ -236,7 +234,6 @@ export default function ReviewPage() {
             )}
           </>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

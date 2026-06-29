@@ -2,20 +2,21 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
   sunSoft: "#FFD75E",
-  plum: "#9B7BD4",
-  warn: "#E07A5F",
-  good: "#5DBE9A",
+  plum: SAX.plum,
+  warn: SAX.warn,
+  good: SAX.good,
 };
 
 type Campaign = { id: string; name: string; share_code: string };
@@ -222,18 +223,15 @@ export default function CheckInPage() {
     } catch (e) { /* clipboard blocked */ }
   }
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20 } as const;
+  const box = { ...surfaces.slate, padding: 20 } as const;
   const btn = (bg: string, fg: string) => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" } as const);
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 920, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Run the session</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
-          Go live when play starts (chat hides), mark attendance, then process to write the recap and open player check-in.
-        </p>
+    <PageShell width={920}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Run the session</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
+        Go live when play starts (chat hides), mark attendance, then process to write the recap and open player check-in.
+      </p>
 
         {/* campaign + portal link */}
         <div style={{ ...box, marginBottom: 18 }}>
@@ -249,7 +247,7 @@ export default function CheckInPage() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input readOnly value={portalLink()} style={{ flex: 1, minWidth: 220, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", fontSize: 13, fontFamily: "ui-monospace, monospace" }} />
-            <button type="button" onClick={copyLink} style={btn(C.sun, "#1B1426")}>{copied ? "Copied" : "Copy"}</button>
+            <button type="button" onClick={copyLink} style={btn(C.sun, SAX.inkDeep)}>{copied ? "Copied" : "Copy"}</button>
           </div>
 
           {sessions.length > 0 && (
@@ -260,7 +258,7 @@ export default function CheckInPage() {
                   const on = selected && selected.id === s.id;
                   return (
                     <button key={s.id} type="button" onClick={() => setSelected(s)}
-                      style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${on ? C.sun : C.line}`, background: on ? C.sun : C.surface2, color: on ? "#1B1426" : C.text, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+                      style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${on ? C.sun : C.line}`, background: on ? C.sun : C.surface2, color: on ? SAX.inkDeep : C.text, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
                       <span style={{ width: 7, height: 7, borderRadius: 7, background: STATUS_TONE[s.status] || C.muted }} />
                       Session {s.session_number ?? "?"}
                     </button>
@@ -286,12 +284,12 @@ export default function CheckInPage() {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {selected.status !== "live" && selected.status !== "processed" && (
-                    <button type="button" onClick={goLive} style={btn(C.warn, "#1B1426")}>Go live</button>
+                    <button type="button" onClick={goLive} style={btn(C.warn, SAX.inkDeep)}>Go live</button>
                   )}
                   {selected.status === "live" && (
                     <span style={{ fontSize: 12, color: C.warn, alignSelf: "center" }}>Live — chat is hidden</span>
                   )}
-                  <button type="button" onClick={processSession} disabled={processing} style={{ ...btn(C.good, "#1B1426"), opacity: processing ? 0.7 : 1 }}>
+                  <button type="button" onClick={processSession} disabled={processing} style={{ ...btn(C.good, SAX.inkDeep), opacity: processing ? 0.7 : 1 }}>
                     {processing ? "Processing…" : selected.status === "processed" ? "Re-process" : "End & process"}
                   </button>
                 </div>
@@ -319,7 +317,7 @@ export default function CheckInPage() {
                         const tone = st.v === "absent" ? C.warn : st.v === "present" ? C.good : C.plum;
                         return (
                           <button key={st.v} type="button" onClick={() => mark(ch.id, st.v)}
-                            style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${on ? tone : C.line}`, background: on ? tone : "transparent", color: on ? "#1B1426" : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                            style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${on ? tone : C.line}`, background: on ? tone : "transparent", color: on ? SAX.inkDeep : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                             {st.l}
                           </button>
                         );
@@ -338,7 +336,7 @@ export default function CheckInPage() {
               </div>
               <textarea value={recapDraft} onChange={(e) => setRecapDraft(e.target.value)} rows={8} placeholder="No recap yet."
                 style={{ width: "100%", boxSizing: "border-box", background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", resize: "vertical", marginBottom: 10 }} />
-              <button type="button" onClick={saveRecap} disabled={recapSaving} style={{ ...btn(C.sun, "#1B1426"), opacity: recapSaving ? 0.7 : 1 }}>
+              <button type="button" onClick={saveRecap} disabled={recapSaving} style={{ ...btn(C.sun, SAX.inkDeep), opacity: recapSaving ? 0.7 : 1 }}>
                 {recapSaving ? "Saving…" : "Save recap"}
               </button>
             </div>
@@ -392,7 +390,6 @@ export default function CheckInPage() {
             )}
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

@@ -2,19 +2,20 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
-  plum: "#9B7BD4",
-  good: "#5DBE9A",
-  warn: "#E07A5F",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
+  plum: SAX.plum,
+  good: SAX.good,
+  warn: SAX.warn,
 };
 
 type Campaign = { id: string; name: string };
@@ -92,7 +93,7 @@ export default function TimelinePage() {
     return { s, opened, touched, grants };
   }).filter((n) => !pc || n.opened.length > 0 || n.touched.length > 0 || n.grants.length > 0);
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 } as const;
+  const box = { ...surfaces.slate, padding: 18 } as const;
   const input = { width: "100%", boxSizing: "border-box" as const, background: C.surface2, color: C.text, border: `1px solid ${C.line}`, borderRadius: 9, padding: "11px 13px", fontSize: 15, outline: "none" };
 
   const Row = ({ color, children }: { color: string; children: React.ReactNode }) => (
@@ -103,13 +104,11 @@ export default function TimelinePage() {
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 820, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Timeline</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 18px" }}>
-          The campaign session by session: threads opened and advanced, loot handed out. Filter to one PC to trace their arc.
-        </p>
+    <PageShell width={820}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Timeline</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 18px" }}>
+        The campaign session by session: threads opened and advanced, loot handed out. Filter to one PC to trace their arc.
+      </p>
 
         <div style={{ ...box, marginBottom: 18 }}>
           <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} style={{ ...input, marginBottom: 12 }}>
@@ -165,7 +164,6 @@ export default function TimelinePage() {
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

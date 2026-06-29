@@ -2,16 +2,17 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
   sunSoft: "#FFD75E",
   plum: "#9B7BD4",
   warn: "#E07A5F",
@@ -222,21 +223,18 @@ export default function CodexPage() {
     ? chars.filter((c) => c.kind === tab)
     : entries.filter((e) => e.type === tab);
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 } as const;
+  const box = { ...surfaces.slate, padding: 18 } as const;
   const input = {
     width: "100%", boxSizing: "border-box" as const, background: C.surface2, color: C.text,
     border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", fontSize: 14, outline: "none",
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 1040, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Codex</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 18px" }}>
-          Notes, lore, places, and the cast. Tag anything to the PCs it involves; set who can see it.
-        </p>
+    <PageShell width={1040}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Codex</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 18px" }}>
+        Notes, lore, places, and the cast. Tag anything to the PCs it involves; set who can see it.
+      </p>
 
         {/* campaign + tabs */}
         <div style={{ ...box, marginBottom: 16 }}>
@@ -250,7 +248,7 @@ export default function CodexPage() {
               return (
                 <button key={t.key} type="button" onClick={() => { setTab(t.key); setMode(null); }}
                   style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${on ? C.sun : C.line}`,
-                    background: on ? C.sun : C.surface2, color: on ? "#1B1426" : C.text, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+                    background: on ? C.sun : C.surface2, color: on ? SAX.inkDeep : C.text, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
                   {t.label}
                 </button>
               );
@@ -266,7 +264,7 @@ export default function CodexPage() {
                 {TABS.find((t) => t.key === tab)?.label.toUpperCase()}
               </span>
               {tab !== "pc" && (
-                <button type="button" onClick={newItem} style={{ background: C.sun, color: "#1B1426", border: "none", borderRadius: 7, padding: "5px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                <button type="button" onClick={newItem} style={{ background: C.sun, color: SAX.inkDeep, border: "none", borderRadius: 7, padding: "5px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
                   + New
                 </button>
               )}
@@ -331,7 +329,7 @@ export default function CodexPage() {
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                   <button type="button" onClick={save} disabled={saving}
-                    style={{ background: `linear-gradient(90deg, ${C.sun}, ${C.sunSoft})`, color: "#1B1426", border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 700, fontSize: 14, cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>
+                    style={{ background: `linear-gradient(90deg, ${C.sun}, ${C.sunSoft})`, color: SAX.inkDeep, border: "none", borderRadius: 9, padding: "10px 20px", fontWeight: 700, fontSize: 14, cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}>
                     {saving ? "Saving…" : "Save"}
                   </button>
                   {mode.id && (
@@ -382,7 +380,7 @@ export default function CodexPage() {
                       </select>
                       <input value={linkRel} onChange={(e) => setLinkRel(e.target.value)} placeholder="relation (optional)" style={{ ...input, flex: "1 1 140px" }} />
                       <button type="button" onClick={addLink} disabled={!linkPick}
-                        style={{ background: C.plum, color: "#1B1426", border: "none", borderRadius: 9, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: linkPick ? "pointer" : "default", opacity: linkPick ? 1 : 0.6 }}>
+                        style={{ background: C.plum, color: SAX.inkDeep, border: "none", borderRadius: 9, padding: "10px 16px", fontWeight: 700, fontSize: 13, cursor: linkPick ? "pointer" : "default", opacity: linkPick ? 1 : 0.6 }}>
                         Link
                       </button>
                     </div>
@@ -395,8 +393,7 @@ export default function CodexPage() {
               </>
             )}
           </div>
-        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

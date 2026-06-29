@@ -2,20 +2,21 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
   sunSoft: "#FFD75E",
-  plum: "#9B7BD4",
-  warn: "#E07A5F",
-  good: "#5DBE9A",
+  plum: SAX.plum,
+  warn: SAX.warn,
+  good: SAX.good,
 };
 
 const SPOTLIGHT: { value: string; label: string; hint: string }[] = [
@@ -99,15 +100,13 @@ export default function VibeCheckPage() {
   const card = { width: "100%", maxWidth: 460, margin: "0 auto", background: C.surface, border: `1px solid ${C.line}`, borderRadius: 16, padding: "32px 28px" } as const;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 920, margin: "0 auto", padding: "0 20px 50px" }}>
-        <WranglerNav />
+    <PageShell width={920}>
         <div style={card}>
           <div style={{ textAlign: "center", marginBottom: 4 }}>
             <span style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 26, fontWeight: 700 }}>Session check-in</span>
           </div>
           <div style={{ textAlign: "center", fontFamily: "ui-monospace, monospace", fontSize: 11, letterSpacing: "0.28em", color: C.muted, marginBottom: 18 }}>
-            {status === "ready" && campaignName ? `SESSION ${sessionNo} \u00b7 ${campaignName.toUpperCase()}` : campaignName ? campaignName.toUpperCase() : "WRANGLER"}
+            {status === "ready" && campaignName ? `SESSION ${sessionNo} \u00b7 ${campaignName.toUpperCase()}` : campaignName ? campaignName.toUpperCase() : "SIX AXES"}
           </div>
           <div style={{ height: 3, borderRadius: 3, background: `linear-gradient(90deg, ${C.sun}, ${C.plum})`, marginBottom: 24 }} />
 
@@ -139,7 +138,7 @@ export default function VibeCheckPage() {
                   const on = satisfaction === n;
                   return (
                     <button key={n} type="button" onClick={() => setSatisfaction(n)}
-                      style={{ flex: 1, padding: "12px 0", borderRadius: 9, border: `1px solid ${on ? C.sun : C.line}`, background: on ? C.sun : C.surface2, color: on ? "#1B1426" : C.text, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>{n}</button>
+                      style={{ flex: 1, padding: "12px 0", borderRadius: 9, border: `1px solid ${on ? C.sun : C.line}`, background: on ? C.sun : C.surface2, color: on ? SAX.inkDeep : C.text, fontSize: 16, fontWeight: 700, cursor: "pointer" }}>{n}</button>
                   );
                 })}
               </div>
@@ -168,14 +167,13 @@ export default function VibeCheckPage() {
                 style={{ width: "100%", boxSizing: "border-box", background: C.surface2, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none", marginBottom: 18 }} />
 
               <button type="button" onClick={submit} disabled={submitting}
-                style={{ width: "100%", background: `linear-gradient(90deg, ${C.sun}, ${C.sunSoft})`, color: "#1B1426", border: "none", borderRadius: 10, padding: "13px 16px", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em", cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.7 : 1 }}>
+                style={{ width: "100%", background: `linear-gradient(90deg, ${C.sun}, ${C.sunSoft})`, color: SAX.inkDeep, border: "none", borderRadius: 10, padding: "13px 16px", fontSize: 15, fontWeight: 700, letterSpacing: "0.02em", cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.7 : 1 }}>
                 {submitting ? "Saving…" : "Submit check-in"}
               </button>
               {error && <p style={{ color: C.warn, fontSize: 13, textAlign: "center", marginTop: 14 }}>{error}</p>}
             </>
           )}
         </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

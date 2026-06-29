@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX } from "@/lib/theme";
 
-// Palette consistent with the TPDI front door.
+// Palette mapped onto the shared cellar theme.
 const C = {
-  ink: "#1B1426", panel: "#251B33", line: "#3D2F52", vellum: "#F4EEFA",
-  muted: "#A597BD", brass: "#F4C430", brassDim: "#B89230",
-  have: "#5DBE9A", missing: "#E07A5F",
+  ink: SAX.inkDeep, panel: SAX.slateBg, line: SAX.line, vellum: SAX.text,
+  muted: SAX.muted, brass: SAX.brass, brassDim: SAX.brassDim,
+  have: SAX.good, missing: SAX.warn,
 };
 
 // Buckets the analyzer treats as the party's "core" coverage targets.
@@ -453,9 +454,9 @@ export default function GMWorkspace() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ background: C.ink, color: C.vellum, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+    <PageShell width={820}>
       <style>{`.tpdi-mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}`}</style>
-      <div style={{ maxWidth: 820, margin: "0 auto", padding: "32px 20px" }}><WranglerNav />{children}</div>
-    </div>
+      {children}
+    </PageShell>
   );
 }

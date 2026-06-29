@@ -18,12 +18,13 @@ const C = {
 
 type Campaign = { id: string; name: string };
 type Entry = { id: string; type: string; title: string; body: string | null; visibility: string; tags: string[] };
-type Char = { id: string; name: string; kind: string; description: string | null; tags: string[] };
+type Char = { id: string; name: string; kind: string; description: string | null; tags: string[]; profile_id: string | null };
 type Sess = { id: string; session_number: number | null; status: string; notes: string | null };
 type Link = { id: string; source_type: string; source_id: string; target_type: string; target_id: string; relation: string | null };
 type Arc = { id: string; title: string; status: string; character_id: string | null; opened_session_id: string | null };
 type Loot = { id: string; session_id: string | null; character_id: string | null; item_name: string; rarity: string | null; est_value: number | null };
-type Seg = { id: string; text: string; start_ms: number | null; job_id: string };
+type Seg = { id: string; text: string; start_ms: number | null; job_id: string | null; character_id: string | null };
+type Vibe = { id: string; session_id: string | null; profile_id: string | null; satisfaction: number | null; spotlight_feeling: string | null; note: string | null; player_name: string | null };
 
 const TYPE_LABEL: Record<string, string> = { note: "Note", location: "Location", lore: "Lore" };
 
@@ -43,6 +44,7 @@ export default function SearchPage() {
   const [links, setLinks] = useState<Link[]>([]);
   const [arcs, setArcs] = useState<Arc[]>([]);
   const [loot, setLoot] = useState<Loot[]>([]);
+  const [vibe, setVibe] = useState<Vibe[]>([]);
   const [jobMeta, setJobMeta] = useState<Record<string, number | null>>({}); // job_id -> session_number
   const [segHits, setSegHits] = useState<Seg[]>([]);
   const [q, setQ] = useState<string>("");
@@ -63,14 +65,15 @@ export default function SearchPage() {
     if (!campaignId) return;
     let active = true;
     (async () => {
-      const [e, c, s, l, a, lt, j] = await Promise.all([
+      const [e, c, s, l, a, lt, j, v] = await Promise.all([
         supabase.from("entries").select("id, type, title, body, visibility, tags").eq("campaign_id", campaignId),
-        supabase.from("characters").select("id, name, kind, description, tags").eq("campaign_id", campaignId),
+        supabase.from("characters").select("id, name, kind, description, tags, profile_id").eq("campaign_id", campaignId),
         supabase.from("sessions").select("id, session_number, status, notes").eq("campaign_id", campaignId),
         supabase.from("entity_links").select("id, source_type, source_id, target_type, target_id, relation").eq("campaign_id", campaignId),
         supabase.from("arcs").select("id, title, status, character_id, opened_session_id").eq("campaign_id", campaignId),
         supabase.from("loot_grants").select("id, session_id, character_id, item_name, rarity, est_value").eq("campaign_id", campaignId),
         supabase.from("capture_jobs").select("id, session:sessions(session_number)").eq("campaign_id", campaignId),
+        supabase.from("vibe_checks").select("id, session_id, profile_id, satisfaction, spotlight_feeling, note, player_name").eq("campaign_id", campaignId),
       ]);
       if (!active) return;
       setEntries((e.data as Entry[]) || []);
@@ -79,6 +82,7 @@ export default function SearchPage() {
       setLinks((l.data as Link[]) || []);
       setArcs((a.data as Arc[]) || []);
       setLoot((lt.data as Loot[]) || []);
+      setVibe((v.data as Vibe[]) || []);
       const jm: Record<string, number | null> = {};
       ((j.data as unknown as { id: string; session: { session_number: number | null } | null }[]) || []).forEach((row) => {
         jm[row.id] = row.session?.session_number ?? null;
@@ -89,25 +93,25 @@ export default function SearchPage() {
   }, [campaignId, supabase]);
 
   // Transcript search runs server-side (the segment table can be large), scoped
-  // to this campaign's jobs, debounced, and only with a real query. Skipped when
-  // filtering by PC, since segments have no direct character link.
+  // by campaign_id, debounced, and only with a real query. transcript_segments
+  // carries character_id, so the PC filter applies here too.
   useEffect(() => {
-    const ql = q.trim().toLowerCase();
-    if (!campaignId || pc || ql.length < 2) { setSegHits([]); return; }
-    const jobIds = Object.keys(jobMeta);
-    if (jobIds.length === 0) { setSegHits([]); return; }
+    const ql2 = q.trim().toLowerCase();
+    if (!campaignId || ql2.length < 2) { setSegHits([]); return; }
     let active = true;
     const t = setTimeout(async () => {
-      const { data } = await supabase
+      let query = supabase
         .from("transcript_segments")
-        .select("id, text, start_ms, job_id")
-        .in("job_id", jobIds)
-        .ilike("text", `%${ql}%`)
+        .select("id, text, start_ms, job_id, character_id")
+        .eq("campaign_id", campaignId)
+        .ilike("text", `%${ql2}%`)
         .limit(40);
+      if (pc) query = query.eq("character_id", pc);
+      const { data } = await query;
       if (active) setSegHits((data as Seg[]) || []);
     }, 250);
     return () => { active = false; clearTimeout(t); };
-  }, [q, pc, campaignId, jobMeta, supabase]);
+  }, [q, pc, campaignId, supabase]);
 
   const labelOf = (type: string, id: string): string => {
     if (type === "character") {
@@ -165,7 +169,9 @@ export default function SearchPage() {
   const aHits = !ql && !pc ? [] : arcs.filter((a) => (!ql || hit(a.title) || hit(a.status)) && linkedToPc("arc", a.id));
   const lHits = !ql && !pc ? [] : loot.filter((g) => (!ql || hit(g.item_name) || hit(g.rarity)) && (!pc || g.character_id === pc));
   const sHits = pc || !ql ? [] : sessions.filter((s) => hit(s.notes) || String(s.session_number ?? "") === ql);
-  const tHits = pc ? [] : segHits;
+  const pcProfile = chars.find((c) => c.id === pc)?.profile_id || null;
+  const vHits = !ql && !pc ? [] : vibe.filter((v) => (!ql || hit(v.note) || hit(v.player_name)) && (!pc || (!!pcProfile && v.profile_id === pcProfile)));
+  const tHits = segHits;
 
   const snippet = (body: string | null): string => {
     if (!body) return "";
@@ -191,13 +197,13 @@ export default function SearchPage() {
       </div>
     );
 
-  const total = eHits.length + cHits.length + aHits.length + lHits.length + sHits.length + tHits.length;
+  const total = eHits.length + cHits.length + aHits.length + lHits.length + sHits.length + vHits.length + tHits.length;
 
   return (
     <PageShell width={880}>
       <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Search</h1>
       <p style={{ color: C.muted, fontSize: 14, margin: "0 0 18px" }}>
-        That time in Middlebrook with the librarian and Bobble, a few keystrokes away. Spans cast, notes, places, story threads, loot, session logs, and transcripts.
+        That time in Middlebrook with the librarian and Bobble, a few keystrokes away. Spans cast, notes, places, story threads, loot, session logs, player check-ins, and transcripts.
       </p>
 
       <div style={{ ...box, marginBottom: 16 }}>
@@ -205,14 +211,14 @@ export default function SearchPage() {
           {campaigns.length === 0 && <option value="">No campaigns yet</option>}
           {campaigns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
         </select>
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cast, notes, lore, places, threads, loot, session logs, transcripts…" style={{ ...input, marginBottom: 12 }} />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cast, notes, lore, places, threads, loot, logs, check-ins, transcripts…" style={{ ...input, marginBottom: 12 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, color: C.muted }}>Involving:</span>
           <select value={pc} onChange={(e) => setPc(e.target.value)} style={{ ...input, width: "auto", flex: "0 1 200px", padding: "8px 10px", fontSize: 13 }}>
             <option value="">any PC</option>
             {pcs.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
           </select>
-          {pc && <span style={{ fontSize: 11, color: C.muted }}>(linked threads, loot, notes, and cast; transcripts need a text query without a PC filter)</span>}
+          {pc && <span style={{ fontSize: 11, color: C.muted }}>(threads, loot, notes, cast, check-ins, and transcripts tied to this PC)</span>}
         </div>
       </div>
 
@@ -289,6 +295,24 @@ export default function SearchPage() {
               <div key={s.id} style={cardInner}>
                 <div style={{ fontSize: 14, fontWeight: 600 }}>Session {s.session_number ?? "?"} <span style={{ color: C.muted, fontWeight: 400, fontSize: 12 }}>· {s.status}</span></div>
                 {s.notes && <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>{snippet(s.notes)}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {vHits.length > 0 && (
+        <div style={{ ...box, marginBottom: 14 }}>
+          <div style={sectionLabel}>PLAYER CHECK-INS</div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {vHits.map((v) => (
+              <div key={v.id} style={cardInner}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
+                  {v.player_name || "Anonymous"}
+                  {v.satisfaction !== null ? <span style={{ color: C.muted, fontWeight: 400, fontSize: 12 }}> · felt {v.satisfaction}/5</span> : null}
+                  {v.spotlight_feeling ? <span style={{ color: C.muted, fontWeight: 400, fontSize: 12 }}> · spotlight: {v.spotlight_feeling.replace(/_/g, " ")}</span> : null}
+                </div>
+                {v.note && <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>{snippet(v.note)}</div>}
               </div>
             ))}
           </div>

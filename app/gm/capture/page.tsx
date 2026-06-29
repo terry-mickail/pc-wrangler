@@ -2,20 +2,21 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import WranglerNav from "@/components/wrangler-nav";
+import PageShell from "@/components/page-shell";
+import { SAX, surfaces, ui } from "@/lib/theme";
 
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
+  bg: SAX.ink,
+  surface: SAX.slateBg,
+  surface2: "rgba(11,7,18,0.6)",
+  line: SAX.line,
+  text: SAX.text,
+  muted: SAX.muted,
+  sun: SAX.sun,
   sunSoft: "#FFD75E",
-  plum: "#9B7BD4",
-  warn: "#E07A5F",
-  good: "#5DBE9A",
+  plum: SAX.plum,
+  warn: SAX.warn,
+  good: SAX.good,
 };
 
 type Campaign = { id: string; name: string };
@@ -193,18 +194,15 @@ export default function CapturePage() {
   const trackChars = new Set(tracks.map((t) => t.character_id));
   const isDraft = !job || job.status === "draft";
 
-  const box = { background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20, marginBottom: 18 } as const;
+  const box = { ...surfaces.slate, padding: 20, marginBottom: 18 } as const;
   const btn = (bg: string, fg: string) => ({ background: bg, color: fg, border: "none", borderRadius: 9, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer" } as const);
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 60px" }}>
-        <WranglerNav />
-
-        <h1 style={{ fontFamily: "'Iowan Old Style', Georgia, serif", fontSize: 28, margin: "8px 0 4px" }}>Capture</h1>
-        <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
-          Record consent, upload one audio track per player, and queue the session for transcription. Nothing is processed until consent is on file.
-        </p>
+    <PageShell width={860}>
+      <h1 style={{ ...ui.h1, fontSize: 28, margin: "4px 0 4px" }}>Capture</h1>
+      <p style={{ color: C.muted, fontSize: 14, margin: "0 0 20px" }}>
+        Record consent, upload one audio track per player, and queue the session for transcription. Nothing is processed until consent is on file.
+      </p>
 
         {/* campaign + session */}
         <div style={box}>
@@ -273,7 +271,7 @@ export default function CapturePage() {
               {!job && (
                 <div style={{ marginTop: 12 }}>
                   <p style={{ color: C.muted, fontSize: 13, marginBottom: 12 }}>One job per recorded session. Create it, then upload each player&apos;s track.</p>
-                  <button type="button" onClick={createJob} style={btn(C.sun, "#1B1426")}>Create capture job</button>
+                  <button type="button" onClick={createJob} style={btn(C.sun, SAX.inkDeep)}>Create capture job</button>
                 </div>
               )}
 
@@ -296,7 +294,7 @@ export default function CapturePage() {
                               {isDraft && <button type="button" onClick={() => removeTrack(tk)} style={{ background: "transparent", color: C.warn, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Remove</button>}
                             </div>
                           ) : isDraft ? (
-                            <label style={{ ...btn(busy ? C.line : C.plum, "#1B1426"), opacity: busy ? 0.7 : 1, display: "inline-block" }}>
+                            <label style={{ ...btn(busy ? C.line : C.plum, SAX.inkDeep), opacity: busy ? 0.7 : 1, display: "inline-block" }}>
                               {busy ? "Uploading…" : "Upload track"}
                               <input type="file" accept="audio/*" disabled={busy} style={{ display: "none" }}
                                 onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadTrack(ch.id, f); e.currentTarget.value = ""; }} />
@@ -315,7 +313,7 @@ export default function CapturePage() {
                     {isDraft ? (
                       <>
                         <button type="button" onClick={submitJob} disabled={!consentOk || tracks.length === 0 || queuing}
-                          style={{ ...btn(C.good, "#1B1426"), opacity: !consentOk || tracks.length === 0 || queuing ? 0.5 : 1, cursor: !consentOk || tracks.length === 0 ? "not-allowed" : "pointer" }}>
+                          style={{ ...btn(C.good, SAX.inkDeep), opacity: !consentOk || tracks.length === 0 || queuing ? 0.5 : 1, cursor: !consentOk || tracks.length === 0 ? "not-allowed" : "pointer" }}>
                           {queuing ? "Queuing…" : "Queue for transcription"}
                         </button>
                         {!consentOk && <span style={{ fontSize: 12, color: C.warn }}>Consent not cleared yet.</span>}
@@ -335,7 +333,6 @@ export default function CapturePage() {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

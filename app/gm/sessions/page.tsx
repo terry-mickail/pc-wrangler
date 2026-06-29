@@ -18,6 +18,8 @@ const btn = { background: C.brass, color: C.ink, border: "none", borderRadius: 9
 const btnGhost = { background: "none", color: C.brass, border: `1px solid ${C.brassDim}`, borderRadius: 9, padding: "9px 16px", fontSize: 13, cursor: "pointer" };
 const CAT_ORDER = ["opportunity", "response", "reward", "meta"];
 const CAT_LABEL: Record<string, string> = { opportunity: "Opportunities", response: "Responses", reward: "Rewards", meta: "Notes" };
+// Test default for the recipients field; clear or change per campaign.
+const DEFAULT_RECIPIENTS = "terry.mickail@gmail.com";
 
 export default function SessionWorkspace() {
   const supabase = useMemo(() => createClient(), []);
@@ -31,6 +33,8 @@ export default function SessionWorkspace() {
   const [recapLoading, setRecapLoading] = useState(false);
   const [recapSaving, setRecapSaving] = useState(false);
   const [recapMsg, setRecapMsg] = useState<string | null>(null);
+  const [recipients, setRecipients] = useState("");
+  const [recapSending, setRecapSending] = useState(false);
 
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [eventTypes, setEventTypes] = useState<any[]>([]);
@@ -105,6 +109,15 @@ export default function SessionWorkspace() {
     setRecapMsg(null);
   }, [session, sessions]);
 
+  // load saved recipient list for the selected campaign
+  useEffect(() => {
+    if (!campaign) return;
+    try {
+      const saved = window.localStorage.getItem(`six_axes_recap_recipients_${campaign}`);
+      setRecipients(saved || DEFAULT_RECIPIENTS);
+    } catch { setRecipients(DEFAULT_RECIPIENTS); }
+  }, [campaign]);
+
   // ---- mutations ----
   async function createSession() {
     if (!campaign || busy) return;
@@ -161,6 +174,35 @@ export default function SessionWorkspace() {
   async function copyRecap() {
     try { await navigator.clipboard.writeText(recap); setRecapMsg("Copied to clipboard."); }
     catch { setRecapMsg("Copy failed; select the text and copy manually."); }
+  }
+
+  async function sendRecap() {
+    if (!session || recapSending) return;
+    setRecapSending(true); setRecapMsg(null);
+    // save the current text first so we send exactly what is shown
+    const { error: saveErr } = await supabase.from("sessions")
+      .update({ recap: recap.trim() || null }).eq("id", session);
+    if (saveErr) { setRecapMsg(saveErr.message); setRecapSending(false); return; }
+    setSessions((arr) => arr.map((s) => (s.id === session ? { ...s, recap: recap.trim() || null } : s)));
+
+    const emails = recipients.split(",").map((e) => e.trim()).filter(Boolean);
+    try {
+      const res = await fetch("/api/recap/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session, emails }),
+      });
+      const data = await res.json();
+      if (!res.ok) setRecapMsg(data.error || "Could not send recap.");
+      else {
+        try { window.localStorage.setItem(`six_axes_recap_recipients_${campaign}`, recipients.trim()); } catch {}
+        const failedNote = data.failed?.length ? ` (${data.failed.length} failed)` : "";
+        setRecapMsg(`Sent to ${data.sent} recipient${data.sent === 1 ? "" : "s"}${failedNote}.`);
+      }
+    } catch {
+      setRecapMsg("Could not send recap. Try again.");
+    }
+    setRecapSending(false);
   }
 
   function pickType(key: string) {
@@ -328,6 +370,22 @@ export default function SessionWorkspace() {
               </button>
               <button style={btnGhost} onClick={copyRecap} disabled={!recap.trim()}>Copy</button>
               {recapMsg && <span style={{ fontSize: 12, color: C.muted }}>{recapMsg}</span>}
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                Email this recap to players (comma-separated). Saves and sends the current text.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+                  placeholder="player1@example.com, player2@example.com"
+                  value={recipients}
+                  onChange={(e) => setRecipients(e.target.value)}
+                />
+                <button style={btn} onClick={sendRecap} disabled={recapSending || !recap.trim() || !recipients.trim()}>
+                  {recapSending ? "Sending..." : "Send to players"}
+                </button>
+              </div>
             </div>
           </div>
 

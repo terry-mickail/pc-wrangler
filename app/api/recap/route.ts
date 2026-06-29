@@ -6,17 +6,52 @@ export const maxDuration = 60;
 // Match this to whatever model string your extraction route already uses.
 const RECAP_MODEL = "claude-sonnet-4-6";
 
+// Transcript handling thresholds (characters).
+const SHORT_LIMIT = 16000;   // below this, feed the transcript directly
+const CHUNK_SIZE = 14000;    // size of each chunk when summarizing a long transcript
+const MAX_CHUNKS = 12;       // safety cap on number of chunks
+const SEGMENT_LIMIT = 4000;  // safety cap on transcript rows pulled
+
 const AXIS_NAME: Record<string, string> = {
   N: "Character", T: "Encounter", O: "System", S: "Table", E: "World", I: "Presence",
 };
 
 const SYSTEM = `You write short "previously on..." recaps for a tabletop RPG group, addressed to the players.
 Rules:
-- Ground every statement in the provided notes and logged events. Do NOT invent characters, outcomes, locations, or plot beats that are not supported by the input.
+- Ground every statement in the provided notes, events, and transcript beats. Do NOT invent characters, outcomes, locations, or plot beats that are not supported by the input.
 - If the input is sparse, write a short recap rather than padding it with invention.
 - Engaging, neutral fantasy-narrative voice. Refer to player characters by name.
 - 2 to 4 short paragraphs of flowing prose. No headers, no bullet points, no lists.
-- Do not address the GM or mention "events," "logs," or the tool. Just tell the story of what happened.`;
+- Do not address the GM or mention "events," "logs," "transcripts," or the tool. Just tell the story of what happened.`;
+
+const CHUNK_SYSTEM = `You are condensing one slice of a longer tabletop RPG session transcript into terse factual beats.
+List what happened in this slice: decisions, actions, discoveries, combat outcomes, loot, NPC interactions, location changes.
+Use the character/speaker names exactly as given. Do not invent anything not present in the text.
+Output a short plain list of beats, one per line, no preamble and no commentary.`;
+
+async function callClaude(apiKey: string, system: string, user: string, maxTokens: number): Promise<string> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: RECAP_MODEL,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: user }],
+    }),
+  });
+  if (!res.ok) throw new Error("model error");
+  const data = await res.json();
+  return (data.content || [])
+    .filter((b: any) => b.type === "text")
+    .map((b: any) => b.text)
+    .join("\n")
+    .trim();
+}
 
 export async function POST(request: Request) {
   try {
@@ -49,6 +84,7 @@ export async function POST(request: Request) {
       { data: events },
       { data: loot },
       { data: touches },
+      { data: jobs },
     ] = await Promise.all([
       supabase.from("campaigns").select("name, system").eq("id", campaignId).single(),
       supabase.from("characters").select("id, name, kind").eq("campaign_id", campaignId),
@@ -62,14 +98,19 @@ export async function POST(request: Request) {
       supabase.from("arc_touches")
         .select("arc_id, arcs(title)")
         .eq("session_id", sessionId),
+      supabase.from("capture_jobs")
+        .select("id, error")
+        .eq("session_id", sessionId),
     ]);
 
     const nameOf = (id: string | null) =>
       (id && characters?.find((c: any) => c.id === id)?.name) || "the party";
+    const speakerOf = (id: string | null) =>
+      (id && characters?.find((c: any) => c.id === id)?.name) || "Speaker";
     const typeLabel = (k: string) =>
       eventTypes?.find((t: any) => t.key === k)?.label || k;
 
-    // Build the grounded context.
+    // ---- structured context ----
     const parts: string[] = [];
     parts.push(`Campaign: ${campaign?.name || "Untitled"}${campaign?.system ? ` (${campaign.system})` : ""}`);
     if (session.session_number != null) parts.push(`Session number: ${session.session_number}`);
@@ -101,49 +142,81 @@ export async function POST(request: Request) {
       if (titles.length) parts.push(`\nStory threads advanced: ${titles.join(", ")}`);
     }
 
+    // ---- transcript context (two-pass for long sessions) ----
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "Recap service is not configured." }, { status: 500 });
+    }
+
+    let hasTranscript = false;
+    const jobIds = (jobs || []).filter((j: any) => !j.error).map((j: any) => j.id);
+    if (jobIds.length) {
+      const { data: segs } = await supabase
+        .from("transcript_segments")
+        .select("text, start_ms, character_id")
+        .in("job_id", jobIds)
+        .order("start_ms", { ascending: true })
+        .limit(SEGMENT_LIMIT);
+
+      const lines = (segs || [])
+        .filter((s: any) => s.text && s.text.trim())
+        .map((s: any) => `${speakerOf(s.character_id)}: ${s.text.trim()}`);
+
+      if (lines.length) {
+        hasTranscript = true;
+        const transcriptText = lines.join("\n");
+
+        let beats = "";
+        try {
+          if (transcriptText.length <= SHORT_LIMIT) {
+            beats = transcriptText;
+          } else {
+            // chunk on line boundaries
+            const chunks: string[] = [];
+            let cur = "";
+            for (const ln of lines) {
+              if (cur && cur.length + ln.length + 1 > CHUNK_SIZE) { chunks.push(cur); cur = ""; }
+              cur += (cur ? "\n" : "") + ln;
+            }
+            if (cur) chunks.push(cur);
+
+            const capped = chunks.slice(0, MAX_CHUNKS);
+            const summaries = await Promise.all(
+              capped.map((chunk, i) =>
+                callClaude(apiKey, CHUNK_SYSTEM, `Part ${i + 1} of ${capped.length}:\n\n${chunk}`, 600)),
+            );
+            beats = summaries.join("\n");
+            if (chunks.length > MAX_CHUNKS) beats += "\n(Transcript truncated for length.)";
+          }
+        } catch {
+          // if summarizing fails, fall back to a truncated raw transcript
+          beats = transcriptText.slice(0, SHORT_LIMIT) + "\n(Transcript truncated.)";
+        }
+
+        if (beats.trim()) parts.push(`\nFrom the session transcript:\n${beats.trim()}`);
+      }
+    }
+
     const hasContent =
       (session.notes && session.notes.trim()) ||
       (events && events.length) ||
-      (loot && loot.length);
+      (loot && loot.length) ||
+      hasTranscript;
     if (!hasContent) {
       return NextResponse.json(
-        { error: "Nothing to summarize yet. Add session notes or log a few events first." },
+        { error: "Nothing to summarize yet. Add session notes, log a few events, or capture a transcript first." },
         { status: 422 },
       );
     }
 
     const context = parts.join("\n");
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Recap service is not configured." }, { status: 500 });
-    }
-
-    const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: RECAP_MODEL,
-        max_tokens: 1024,
-        system: SYSTEM,
-        messages: [{ role: "user", content: context }],
-      }),
-    });
-
-    if (!aiRes.ok) {
+    let recap = "";
+    try {
+      recap = await callClaude(apiKey, SYSTEM, context, 1024);
+    } catch {
       return NextResponse.json({ error: "The recap model returned an error. Try again." }, { status: 502 });
     }
-
-    const data = await aiRes.json();
-    const recap = (data.content || [])
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text)
-      .join("\n")
-      .trim();
 
     if (!recap) {
       return NextResponse.json({ error: "The recap came back empty. Try again." }, { status: 502 });

@@ -26,6 +26,12 @@ export default function SessionWorkspace() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // recap (Phase 1 hero)
+  const [recap, setRecap] = useState("");
+  const [recapLoading, setRecapLoading] = useState(false);
+  const [recapSaving, setRecapSaving] = useState(false);
+  const [recapMsg, setRecapMsg] = useState<string | null>(null);
+
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [eventTypes, setEventTypes] = useState<any[]>([]);
   const [campaign, setCampaign] = useState<string | null>(null);
@@ -66,7 +72,7 @@ export default function SessionWorkspace() {
     const [{ data: chars }, { data: sess }, { data: arcRows }] = await Promise.all([
       supabase.from("characters").select("id,name,class,subclass,kind,active")
         .eq("campaign_id", campaignId).eq("active", true).order("kind").order("name"),
-      supabase.from("sessions").select("id,session_number,status,capture_modality,consent_recorded,notes,created_at")
+      supabase.from("sessions").select("id,session_number,status,capture_modality,consent_recorded,notes,recap,created_at")
         .eq("campaign_id", campaignId).order("session_number", { ascending: false, nullsFirst: false }),
       supabase.from("arcs").select("id,title,status,character_id,last_touched_session_id")
         .eq("campaign_id", campaignId).order("created_at", { ascending: true }),
@@ -92,6 +98,13 @@ export default function SessionWorkspace() {
 
   useEffect(() => { if (session) loadEvents(session); else setEvents([]); }, [session, loadEvents]);
 
+  // keep the recap textarea in sync with the selected session
+  useEffect(() => {
+    const s = sessions.find((x) => x.id === session);
+    setRecap(s?.recap || "");
+    setRecapMsg(null);
+  }, [session, sessions]);
+
   // ---- mutations ----
   async function createSession() {
     if (!campaign || busy) return;
@@ -112,6 +125,42 @@ export default function SessionWorkspace() {
     const { error } = await supabase.from("sessions")
       .update({ status: "completed", ended_at: new Date().toISOString() }).eq("id", session);
     if (error) setErr(error.message); else if (campaign) loadCampaignData(campaign);
+  }
+
+  async function generateRecap() {
+    if (!session || recapLoading) return;
+    setRecapLoading(true); setRecapMsg(null); setErr(null);
+    try {
+      const res = await fetch("/api/recap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session }),
+      });
+      const data = await res.json();
+      if (!res.ok) setRecapMsg(data.error || "Could not generate recap.");
+      else { setRecap(data.recap || ""); setRecapMsg("Draft generated. Edit, then Save."); }
+    } catch {
+      setRecapMsg("Could not generate recap. Try again.");
+    }
+    setRecapLoading(false);
+  }
+
+  async function saveRecap() {
+    if (!session || recapSaving) return;
+    setRecapSaving(true); setRecapMsg(null);
+    const { error } = await supabase.from("sessions")
+      .update({ recap: recap.trim() || null }).eq("id", session);
+    if (error) setRecapMsg(error.message);
+    else {
+      setSessions((arr) => arr.map((s) => (s.id === session ? { ...s, recap: recap.trim() || null } : s)));
+      setRecapMsg("Saved.");
+    }
+    setRecapSaving(false);
+  }
+
+  async function copyRecap() {
+    try { await navigator.clipboard.writeText(recap); setRecapMsg("Copied to clipboard."); }
+    catch { setRecapMsg("Copy failed; select the text and copy manually."); }
   }
 
   function pickType(key: string) {
@@ -259,6 +308,29 @@ export default function SessionWorkspace() {
 
       {session && (
         <>
+          {/* recap (Phase 1 hero) */}
+          <div style={box}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: C.muted }}>Session recap</div>
+              <button style={btnGhost} onClick={generateRecap} disabled={recapLoading}>
+                {recapLoading ? "Generating..." : recap ? "Regenerate" : "Generate recap"}
+              </button>
+            </div>
+            <textarea
+              value={recap}
+              onChange={(e) => setRecap(e.target.value)}
+              placeholder="Generate a recap from this session's notes and logged events, or write your own. This is the 'previously on...' your players see."
+              style={{ ...inputStyle, width: "100%", boxSizing: "border-box", minHeight: 160, lineHeight: 1.6, resize: "vertical", fontFamily: "inherit" }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={btn} onClick={saveRecap} disabled={recapSaving || !recap.trim()}>
+                {recapSaving ? "Saving..." : "Save recap"}
+              </button>
+              <button style={btnGhost} onClick={copyRecap} disabled={!recap.trim()}>Copy</button>
+              {recapMsg && <span style={{ fontSize: 12, color: C.muted }}>{recapMsg}</span>}
+            </div>
+          </div>
+
           {/* event logger */}
           <div style={box}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>

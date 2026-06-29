@@ -2,18 +2,21 @@
 
 import React, { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { SAX, surfaces, stoneBackground } from "@/lib/theme";
 
+/* Login lives outside PageShell (no nav), but uses the shared cellar theme:
+   the stone wall background, a brass-edged panel, and brass controls. */
 const C = {
-  bg: "#1B1426",
-  surface: "#251B33",
-  surface2: "#2F2340",
-  line: "#3D2F52",
-  text: "#F4EEFA",
-  muted: "#A597BD",
-  sun: "#F4C430",
-  sunSoft: "#FFD75E",
-  plum: "#9B7BD4",
-  warn: "#E07A5F",
+  text: SAX.text,
+  muted: SAX.muted,
+  line: SAX.line,
+  brass: SAX.brass,
+  sun: SAX.sun,
+  plum: SAX.plum,
+  warn: SAX.warn,
+  inkDeep: SAX.inkDeep,
+  field: "rgba(11,7,18,0.55)",
+  panel2: "rgba(11,7,18,0.5)",
 };
 
 export default function LoginPage() {
@@ -69,34 +72,41 @@ export default function LoginPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: C.bg,
         color: C.text,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
         fontFamily: "ui-sans-serif, system-ui, sans-serif",
+        ...stoneBackground(),
       }}
     >
+      <style>{`input::placeholder{color:${C.muted};opacity:0.8;}`}</style>
       <div
         style={{
+          ...surfaces.panel,
           width: "100%",
           maxWidth: 420,
-          background: C.surface,
-          border: `1px solid ${C.line}`,
           borderRadius: 16,
           padding: "40px 32px",
-          boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
         }}
       >
         {/* Brand */}
+        <img
+          src="/astrolabe.png"
+          alt=""
+          width={46}
+          height={46}
+          style={{ display: "block", margin: "0 auto 10px", opacity: 0.92, filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))" }}
+        />
         <div style={{ textAlign: "center", marginBottom: 6 }}>
           <span
             style={{
-              fontFamily: "'Iowan Old Style', Georgia, serif",
+              fontFamily: SAX.serif,
               fontSize: 30,
-              fontWeight: 700,
+              fontWeight: 600,
               letterSpacing: "-0.01em",
+              color: C.text,
             }}
           >
             Six Axes
@@ -105,22 +115,23 @@ export default function LoginPage() {
         <div
           style={{
             textAlign: "center",
-            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            fontFamily: SAX.mono,
             fontSize: 11,
-            letterSpacing: "0.32em",
+            letterSpacing: "0.28em",
+            textTransform: "uppercase",
             color: C.muted,
             marginBottom: 22,
           }}
         >
-          RUN THE TABLE
+          Run the table
         </div>
 
-        {/* Sunflower divider */}
+        {/* Brass divider */}
         <div
           style={{
             height: 3,
             borderRadius: 3,
-            background: `linear-gradient(90deg, ${C.sun}, ${C.plum})`,
+            background: `linear-gradient(90deg, ${C.brass}, ${C.plum})`,
             marginBottom: 26,
           }}
         />
@@ -201,14 +212,14 @@ export default function LoginPage() {
         {/* OR divider */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "22px 0" }}>
           <div style={{ flex: 1, height: 1, background: C.line }} />
-          <span style={{ color: C.muted, fontSize: 12, fontFamily: "ui-monospace, monospace" }}>or</span>
+          <span style={{ color: C.muted, fontSize: 12, fontFamily: SAX.mono }}>or</span>
           <div style={{ flex: 1, height: 1, background: C.line }} />
         </div>
 
         {sent ? (
           <div
             style={{
-              background: C.surface2,
+              background: C.panel2,
               border: `1px solid ${C.line}`,
               borderRadius: 10,
               padding: "18px 16px",
@@ -232,7 +243,7 @@ export default function LoginPage() {
               style={{
                 width: "100%",
                 boxSizing: "border-box",
-                background: C.surface2,
+                background: C.field,
                 border: `1px solid ${C.line}`,
                 borderRadius: 10,
                 padding: "12px 14px",
@@ -248,8 +259,8 @@ export default function LoginPage() {
               disabled={sending}
               style={{
                 width: "100%",
-                background: `linear-gradient(90deg, ${C.sun}, ${C.sunSoft})`,
-                color: "#1B1426",
+                background: `linear-gradient(90deg, ${C.brass}, ${C.sun})`,
+                color: C.inkDeep,
                 border: "none",
                 borderRadius: 10,
                 padding: "12px 16px",

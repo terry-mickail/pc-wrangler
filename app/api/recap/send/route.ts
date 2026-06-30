@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { postRecapToDiscord } from "@/lib/discord/post";
 
 export const maxDuration = 30;
 
@@ -51,9 +52,6 @@ export async function POST(request: Request) {
     const emails = Array.from(new Set(
       rawEmails.map((e) => String(e).trim().toLowerCase()).filter((e) => EMAIL_RE.test(e)),
     )).slice(0, MAX_RECIPIENTS);
-    if (!emails.length) {
-      return NextResponse.json({ error: "Add at least one valid email address." }, { status: 400 });
-    }
 
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -75,41 +73,63 @@ export async function POST(request: Request) {
     }
 
     const { data: campaign } = await supabase
-      .from("campaigns").select("name").eq("id", session.campaign_id).single();
+      .from("campaigns").select("name, discord_channel_id").eq("id", session.campaign_id).single();
     const campaignName = campaign?.name || "Your campaign";
+    const discordChannelId = campaign?.discord_channel_id || null;
 
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Email service is not configured." }, { status: 500 });
+    // Need at least one destination: emails, or a linked Discord channel.
+    if (!emails.length && !discordChannelId) {
+      return NextResponse.json(
+        { error: "Add at least one valid email, or run /setup in Discord to post recaps there." },
+        { status: 400 },
+      );
     }
 
-    const subject = session.session_number != null
-      ? `Recap — ${campaignName}, Session ${session.session_number}`
-      : `Recap — ${campaignName}`;
-    const html = recapHtml(campaignName, session.session_number, session.recap);
+    let sent = 0;
+    let failed: string[] = [];
 
-    const results = await Promise.all(emails.map(async (to) => {
-      try {
-        const res = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({
-            from: RECAP_FROM,
-            to: [to],
-            subject,
-            html,
-            headers: { "List-Unsubscribe": `<${UNSUBSCRIBE_MAILTO}>` },
-          }),
-        });
-        return res.ok ? { to, ok: true } : { to, ok: false };
-      } catch {
-        return { to, ok: false };
+    if (emails.length) {
+      const apiKey = process.env.RESEND_API_KEY;
+      if (!apiKey) {
+        return NextResponse.json({ error: "Email service is not configured." }, { status: 500 });
       }
-    }));
 
-    const sent = results.filter((r) => r.ok).length;
-    const failed = results.filter((r) => !r.ok).map((r) => r.to);
-    return NextResponse.json({ sent, failed });
+      const subject = session.session_number != null
+        ? `Recap — ${campaignName}, Session ${session.session_number}`
+        : `Recap — ${campaignName}`;
+      const html = recapHtml(campaignName, session.session_number, session.recap);
+
+      const results = await Promise.all(emails.map(async (to) => {
+        try {
+          const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+            body: JSON.stringify({
+              from: RECAP_FROM,
+              to: [to],
+              subject,
+              html,
+              headers: { "List-Unsubscribe": `<${UNSUBSCRIBE_MAILTO}>` },
+            }),
+          });
+          return res.ok ? { to, ok: true } : { to, ok: false };
+        } catch {
+          return { to, ok: false };
+        }
+      }));
+
+      sent = results.filter((r) => r.ok).length;
+      failed = results.filter((r) => !r.ok).map((r) => r.to);
+    }
+
+    let discordPosted = false;
+    if (discordChannelId) {
+      discordPosted = await postRecapToDiscord(
+        discordChannelId, campaignName, session.session_number, session.recap,
+      );
+    }
+
+    return NextResponse.json({ sent, failed, discordPosted });
   } catch {
     return NextResponse.json({ error: "Could not send recap." }, { status: 500 });
   }

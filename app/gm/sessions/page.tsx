@@ -45,6 +45,7 @@ export default function SessionWorkspace() {
   const [schedDraft, setSchedDraft] = useState("");
   const [schedSaving, setSchedSaving] = useState(false);
   const [schedMsg, setSchedMsg] = useState<string | null>(null);
+  const [rsvps, setRsvps] = useState<{ status: string; display_name: string | null; character_name: string | null }[]>([]);
 
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [eventTypes, setEventTypes] = useState<any[]>([]);
@@ -129,6 +130,17 @@ export default function SessionWorkspace() {
       setRecipients(saved || DEFAULT_RECIPIENTS);
     } catch { setRecipients(DEFAULT_RECIPIENTS); }
   }, [campaign]);
+
+  // load who has RSVP'd for the selected session
+  useEffect(() => {
+    if (!session) { setRsvps([]); return; }
+    let active = true;
+    (async () => {
+      const { data } = await supabase.rpc("rsvps_for_gm", { p_session_id: session });
+      if (active) setRsvps((data as any[]) || []);
+    })();
+    return () => { active = false; };
+  }, [session, supabase]);
 
   // ---- mutations ----
   async function createSession() {
@@ -433,6 +445,25 @@ export default function SessionWorkspace() {
             <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
               Players RSVP to this at the share link. A reminder emails those who said yes the day before.
             </div>
+            {rsvps.length > 0 && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                  Who's coming: {rsvps.filter((r) => r.status === "going").length} in
+                  {" \u00b7 "}{rsvps.filter((r) => r.status === "maybe").length} maybe
+                  {" \u00b7 "}{rsvps.filter((r) => r.status === "declined").length} out
+                </div>
+                <div style={{ display: "grid", gap: 5 }}>
+                  {rsvps.map((r, i) => (
+                    <div key={i} style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 8, flexShrink: 0,
+                        background: r.status === "going" ? SAX.good : r.status === "maybe" ? C.brass : C.warn }} />
+                      <span style={{ color: C.vellum }}>{r.display_name || "A player"}{r.character_name ? ` (${r.character_name})` : ""}</span>
+                      <span style={{ color: C.muted, fontSize: 11 }}>{r.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* event logger */}

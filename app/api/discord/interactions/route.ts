@@ -126,6 +126,7 @@ export async function POST(request: Request) {
     const cid = interaction.data?.custom_id ?? "";
     if (cid.startsWith("claim:")) return await handleClaimSelect(interaction);
     if (cid.startsWith("rsvp:")) return await handleRsvpButton(interaction);
+    if (cid.startsWith("consent:")) return await handleConsentButton(interaction);
     return ephemeral("Unknown action.");
   }
 
@@ -397,19 +398,22 @@ async function handleRecord(interaction: Interaction) {
     return ephemeral("A recording is already requested or running for this campaign. Use /stop first.");
   }
 
-  // Best-effort current session: the latest one not yet ended.
+  // A recording needs a session to attach audio and consent to.
   const { data: sess } = await sb
     .from("sessions")
-    .select("id")
+    .select("id, session_number")
     .eq("campaign_id", campaign.id)
     .is("ended_at", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (!sess) {
+    return ephemeral("No open session to record. Start a session in the app first, then run /record.");
+  }
 
   const { error } = await sb.from("capture_control").insert({
     campaign_id: campaign.id,
-    session_id: sess?.id ?? null,
+    session_id: sess.id,
     guild_id: interaction.guild_id,
     requested_by_discord_id: discordUserId(interaction),
     status: "requested",
@@ -418,7 +422,30 @@ async function handleRecord(interaction: Interaction) {
     return ephemeral("Could not start the recording request. Try again in a moment.");
   }
 
-  return ephemeral("Recording requested. The bot will join your voice channel shortly. Use /stop when you're done.");
+  const heading = sess.session_number != null ? `Session ${sess.session_number}` : "this session";
+  return NextResponse.json({
+    type: CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {
+      embeds: [
+        {
+          title: `Recording ${heading} \u2014 ${campaign.name}`.slice(0, 256),
+          description:
+            "Six Axes will capture each speaker's audio to help your GM build recaps and table analytics. " +
+            "Tap **I consent** to log your agreement to be recorded. If you don't consent, please leave the voice " +
+            "channel. You can ask your GM to delete the recording at any time.",
+          color: BRASS,
+        },
+      ],
+      components: [
+        {
+          type: ACTION_ROW,
+          components: [
+            { type: BUTTON, style: STYLE_SUCCESS, label: "I consent", custom_id: `consent:${sess.id}` },
+          ],
+        },
+      ],
+    },
+  });
 }
 
 async function handleStop(interaction: Interaction) {
@@ -452,4 +479,63 @@ async function handleStop(interaction: Interaction) {
     .eq("id", active.id);
 
   return ephemeral("Stopping the recording. The bot will finish up and process the audio.");
+}
+
+async function handleConsentButton(interaction: Interaction) {
+  const cid = interaction.data?.custom_id ?? "";
+  const sessionId = cid.startsWith("consent:") ? cid.slice("consent:".length) : "";
+  const userId = discordUserId(interaction);
+  if (!sessionId || !userId) {
+    return ephemeral("Something went wrong logging your consent. Try again.");
+  }
+
+  const sb = serviceClient();
+  const { data: session } = await sb
+    .from("sessions").select("id, campaign_id").eq("id", sessionId).maybeSingle();
+  if (!session) {
+    return ephemeral("That session no longer exists.");
+  }
+
+  const { data: character } = await sb
+    .from("characters")
+    .select("id, name, profile_id")
+    .eq("campaign_id", session.campaign_id)
+    .eq("discord_user_id", userId)
+    .eq("kind", "pc")
+    .eq("active", true)
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
+  if (!character) {
+    return ephemeral("Link your character first with /claim, then tap I consent.");
+  }
+
+  const { data: existing } = await sb
+    .from("recording_consents")
+    .select("id")
+    .eq("session_id", sessionId)
+    .eq("character_id", character.id)
+    .maybeSingle();
+
+  if (existing) {
+    await sb.from("recording_consents")
+      .update({
+        consented: true,
+        method: "discord_button",
+        profile_id: character.profile_id,
+        campaign_id: session.campaign_id,
+      })
+      .eq("id", existing.id);
+  } else {
+    await sb.from("recording_consents").insert({
+      campaign_id: session.campaign_id,
+      session_id: sessionId,
+      character_id: character.id,
+      profile_id: character.profile_id,
+      consented: true,
+      method: "discord_button",
+    });
+  }
+
+  return ephemeral(`Thanks, ${character.name}. Your consent to be recorded is logged.`);
 }

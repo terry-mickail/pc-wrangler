@@ -1,0 +1,9 @@
+# Six Axes voice sidecar. Worker app: no inbound HTTP, no health checks.
+app = "six-axes-sidecar"
+primary_region = "sjc"
+
+[build]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

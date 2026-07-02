@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # git: to pip-install the pinned py-cord branch. libopus0: voice decode (used from Stage 2).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git libopus0 \
+      git libopus0 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

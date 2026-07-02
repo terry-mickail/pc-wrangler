@@ -1,40 +1,43 @@
 """
-Six Axes voice sidecar - Stage 3: attribution + upload + audio_tracks.
+Six Axes voice sidecar - Stage 4: hardened capture for real, multi-hour sessions.
 
-Driven by the capture_control table (the control plane):
-  - status 'requested' + requester in a voice channel  -> join, start recording, set 'active'
-  - status 'stopping' (set by /stop)                    -> stop, read sink directly, then:
-        * resolve each Discord speaker -> character via characters.discord_user_id
-        * upload each per-speaker WAV to the session-audio bucket
-        * create ONE capture_jobs row (source 'online', status 'draft')
-        * write one audio_tracks row per speaker (status 'pending')
-        * link capture_control.capture_job_id and set 'done'
+What Stage 4 adds over Stage 3:
+  1. Chunked capture: the sink is rotated every FLUSH_SECONDS. Each finished chunk is
+     compressed to Opus (.ogg, mono 32kbps) on local disk immediately, so memory stays
+     bounded (~one chunk of PCM) instead of holding a whole session of WAV in RAM.
+  2. On /stop, each speaker's chunks are concatenated into ONE continuous .ogg,
+     time-aligned across speakers (late joiners get leading silence), uploaded to the
+     session-audio bucket, and written as a single audio_tracks row per speaker.
+  3. OpusError-on-rekey guard: a corrupted packet during a DAVE rekey (someone joins or
+     leaves voice) no longer kills the recording; the packet is skipped.
+  4. Reconnect handling: if the voice connection drops mid-session (1006 etc.), the
+     current chunk is salvaged, the sidecar reconnects to the channel, and recording
+     resumes into a new chunk.
 
-This produces exactly what the in-app recorder produces: a draft job with pending tracks,
-which surfaces in the existing /capture GM view. It deliberately does NOT submit to Deepgram;
-that stays the GM's consent-gated in-app action (session_consent_ok). Pipeline auto-handoff and
-long-session hardening are Stage 4.
-
-Capture uses the proven direct-sink-read pattern (py-cord fix/voice-rec-2): the branch's
-stop-callback is unreliable, so we call stop_recording() and read sink.audio_data DIRECTLY
-after a short wait.
+The output contract is unchanged from Stage 3: one draft capture job (source 'online'),
+one pending audio_tracks row per attributable speaker, consent-gated Deepgram submission
+stays the GM's in-app action.
 
 Env:
   DISCORD_BOT_TOKEN
-  SUPABASE_URL                 (same value as NEXT_PUBLIC_SUPABASE_URL)
+  SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  POLL_SECONDS                 (optional, default 4)
-  STOP_READ_DELAY_SECONDS      (optional, default 3)
-  AUDIO_BUCKET                 (optional, default 'session-audio')
+  POLL_SECONDS               (optional, default 4)
+  STOP_READ_DELAY_SECONDS    (optional, default 3; wait after stop_recording before reading sink)
+  FLUSH_SECONDS              (optional, default 300; sink rotation interval)
+  AUDIO_BUCKET               (optional, default 'session-audio')
+  OPUS_BITRATE               (optional, default '32k')
 """
 
 import os
 import io
 import time
 import wave
+import shutil
 import asyncio
 import datetime
 import logging
+import tempfile
 import httpx
 import discord
 
@@ -48,7 +51,9 @@ SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "4"))
 STOP_READ_DELAY_SECONDS = int(os.environ.get("STOP_READ_DELAY_SECONDS", "3"))
+FLUSH_SECONDS = int(os.environ.get("FLUSH_SECONDS", "300"))
 AUDIO_BUCKET = os.environ.get("AUDIO_BUCKET", "session-audio")
+OPUS_BITRATE = os.environ.get("OPUS_BITRATE", "32k")
 
 REST = f"{SUPABASE_URL}/rest/v1"
 STORAGE = f"{SUPABASE_URL}/storage/v1/object"
@@ -61,30 +66,139 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def _wav_duration_seconds(blob: bytes):
-    """Best-effort duration from a WAV blob; None if it cannot be parsed."""
+def install_opus_rekey_guard():
+    """A corrupted packet during a DAVE rekey raises OpusError inside PacketRouter._do_run
+    and, unguarded, kills the whole recording. The packet is already consumed from the
+    jitter buffer at that point, so it is safe to skip it and resume the loop."""
     try:
-        with wave.open(io.BytesIO(blob), "rb") as w:
-            frames = w.getnframes()
-            rate = w.getframerate()
-            if rate:
-                return round(frames / rate)
-    except Exception:
-        return None
-    return None
+        from discord.opus import OpusError
+        from discord.voice.receive import router as _router
+        original = _router.PacketRouter._do_run
+
+        def guarded(self, *a, **kw):
+            while True:
+                try:
+                    return original(self, *a, **kw)
+                except OpusError as e:
+                    log.warning("OpusError in packet router (rekey glitch); skipping packet: %r", e)
+
+        _router.PacketRouter._do_run = guarded
+        log.info("Opus rekey guard installed.")
+    except Exception as e:
+        log.warning("Opus rekey guard NOT installed (recording still works, rekeys are riskier): %r", e)
 
 
 async def _after_record(sink, *args):
-    # The branch's after-callback is unreliable and can wedge on teardown.
-    # We deliberately do nothing here and read the sink directly in do_stop().
+    # The branch's after-callback is unreliable; all real work reads the sink directly.
     return
+
+
+def _wav_params(blob: bytes):
+    """(frames, rate) from a WAV blob, or (None, None)."""
+    try:
+        with wave.open(io.BytesIO(blob), "rb") as w:
+            return w.getnframes(), w.getframerate()
+    except Exception:
+        return None, None
+
+
+async def encode_wav_to_ogg(wav_blob: bytes, out_path: str) -> bool:
+    """Compress a WAV chunk to mono Opus .ogg via ffmpeg (stdin -> file)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", "pipe:0", "-ac", "1", "-c:a", "libopus", "-b:a", OPUS_BITRATE,
+            "-f", "ogg", "-y", out_path,
+            stdin=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate(input=wav_blob)
+        if proc.returncode != 0:
+            log.warning("ffmpeg chunk encode failed: %s", (err or b"").decode(errors="replace")[:300])
+            return False
+        return True
+    except Exception as e:
+        log.warning("ffmpeg chunk encode error: %r", e)
+        return False
+
+
+async def make_silence_ogg(seconds: float, out_path: str) -> bool:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+            "-t", f"{max(seconds, 0.05):.3f}", "-c:a", "libopus", "-b:a", OPUS_BITRATE,
+            "-f", "ogg", "-y", out_path,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            log.warning("ffmpeg silence gen failed: %s", (err or b"").decode(errors="replace")[:300])
+            return False
+        return True
+    except Exception as e:
+        log.warning("ffmpeg silence gen error: %r", e)
+        return False
+
+
+async def concat_oggs(paths: list, out_path: str) -> bool:
+    """Concatenate ogg chunks into one continuous ogg (re-encode for a clean single stream)."""
+    list_path = out_path + ".txt"
+    try:
+        with open(list_path, "w") as f:
+            for p in paths:
+                f.write(f"file '{p}'\n")
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", list_path,
+            "-c:a", "libopus", "-b:a", OPUS_BITRATE, "-f", "ogg", "-y", out_path,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            log.warning("ffmpeg concat failed: %s", (err or b"").decode(errors="replace")[:300])
+            return False
+        return True
+    except Exception as e:
+        log.warning("ffmpeg concat error: %r", e)
+        return False
+    finally:
+        try:
+            os.remove(list_path)
+        except Exception:
+            pass
+
+
+class Recording:
+    """State for one capture_control request being recorded."""
+
+    def __init__(self, rid, vc, channel_id, guild_id, campaign_id, session_id):
+        self.rid = rid
+        self.vc = vc
+        self.channel_id = channel_id
+        self.guild_id = guild_id
+        self.campaign_id = campaign_id
+        self.session_id = session_id
+        self.sink = None
+        self.chunk_index = 0
+        self.chunk_started_at = time.monotonic()
+        self.tmpdir = tempfile.mkdtemp(prefix=f"capture-{rid[:8]}-")
+        # uid -> list of (chunk_index, ogg_path, seconds)
+        self.speaker_chunks: dict = {}
+        # chunk_index -> canonical seconds (max over speakers), for silence padding
+        self.chunk_seconds: dict = {}
+        self.flush_tasks: list = []
+        self.reconnect_attempts = 0
+
+    def cleanup(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
 
 
 class Sidecar(discord.Client):
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.voice_locations: dict[tuple[str, str], str] = {}  # (guild_id, user_id) -> channel_id
-        self.recordings: dict[str, dict] = {}                  # capture_control id -> recording state
+        self.voice_locations: dict = {}   # (guild_id, user_id) -> channel_id
+        self.recordings: dict = {}        # rid -> Recording
         self.waiting_logged: set = set()
         self._started = False
 
@@ -108,11 +222,13 @@ class Sidecar(discord.Client):
             self.voice_locations.pop(key, None)
             log.info("voice: user %s left voice", member.id)
 
+    # ------------------------------------------------------------------ poll
+
     async def poll_loop(self):
         await self.wait_until_ready()
-        log.info("Poller started (every %ss).", POLL_SECONDS)
+        log.info("Poller started (every %ss, chunk rotation every %ss).", POLL_SECONDS, FLUSH_SECONDS)
         ticks = 0
-        async with httpx.AsyncClient(timeout=30) as http:
+        async with httpx.AsyncClient(timeout=60) as http:
             while not self.is_closed():
                 try:
                     r = await http.get(
@@ -126,6 +242,7 @@ class Sidecar(discord.Client):
                             await self.handle_control_row(http, row)
                         except Exception as e:
                             log.warning("row %s error: %r", row.get("id"), e)
+                    await self.maintain_recordings(http)
                     ticks += 1
                     if ticks % 15 == 0:
                         log.info("poll alive: tick %d, %d active recording(s), tracking %d voice location(s)",
@@ -140,6 +257,27 @@ class Sidecar(discord.Client):
             await self.try_start(http, row)
         elif status == "stopping":
             await self.do_stop(http, row)
+
+    async def maintain_recordings(self, http):
+        """Per-tick upkeep on active recordings: chunk rotation and dead-connection recovery."""
+        for rec in list(self.recordings.values()):
+            # Recover a dropped voice connection (1006 etc.).
+            if not rec.vc.is_connected():
+                log.warning("recording %s: voice connection lost; salvaging chunk and reconnecting.", rec.rid)
+                await self.rotate_chunk(rec, restart=False)
+                if not await self.reconnect(rec):
+                    rec.reconnect_attempts += 1
+                    if rec.reconnect_attempts >= 5:
+                        log.warning("recording %s: reconnect failed %d times; finalizing with what we have.",
+                                    rec.rid, rec.reconnect_attempts)
+                        await self.finalize(http, rec, note="connection lost; partial capture")
+                continue
+            rec.reconnect_attempts = 0
+            # Rotate the sink on schedule to bound memory.
+            if time.monotonic() - rec.chunk_started_at >= FLUSH_SECONDS:
+                await self.rotate_chunk(rec, restart=True)
+
+    # ----------------------------------------------------------- start / stop
 
     async def try_start(self, http, row):
         rid = row["id"]
@@ -163,114 +301,184 @@ class Sidecar(discord.Client):
             log.warning("request %s: connect failed: %r", rid, e)
             await self.patch_status(http, rid, "error", error=f"connect failed: {e}")
             return
-        sink = discord.sinks.WaveSink()
+        rec = Recording(rid, vc, chan_id, g, row.get("campaign_id"), row.get("session_id"))
+        rec.sink = discord.sinks.WaveSink()
         try:
-            vc.start_recording(sink, _after_record)
+            vc.start_recording(rec.sink, _after_record)
         except Exception as e:
             log.warning("request %s: start_recording failed: %r", rid, e)
             try:
                 await vc.disconnect()
             except Exception:
                 pass
+            rec.cleanup()
             await self.patch_status(http, rid, "error", error=f"start_recording failed: {e}")
             return
-        self.recordings[rid] = {
-            "vc": vc,
-            "sink": sink,
-            "guild_id": g,
-            "channel_id": chan_id,
-            "session_id": row.get("session_id"),
-            "campaign_id": row.get("campaign_id"),
-        }
+        self.recordings[rid] = rec
         self.waiting_logged.discard(rid)
         await self.patch_status(http, rid, "active")
-        log.info("RECORDING started: request %s in channel %s (session %s).",
-                 rid, chan_id, row.get("session_id"))
+        log.info("RECORDING started: request %s in channel %s (session %s).", rid, chan_id, row.get("session_id"))
+
+    async def rotate_chunk(self, rec: Recording, restart: bool):
+        """Stop the current sink, (optionally) start a fresh one immediately, then read and
+        compress the finished sink in the background. Keeps memory to ~one chunk of PCM."""
+        old_sink = rec.sink
+        idx = rec.chunk_index
+        try:
+            rec.vc.stop_recording()
+        except Exception as e:
+            log.warning("recording %s: stop_recording during rotation raised: %r", rec.rid, e)
+        if restart:
+            new_sink = discord.sinks.WaveSink()
+            try:
+                rec.vc.start_recording(new_sink, _after_record)
+                rec.sink = new_sink
+            except Exception as e:
+                log.warning("recording %s: restart after rotation failed (%r); trying full reconnect.", rec.rid, e)
+                rec.sink = None
+                await self.reconnect(rec)
+        rec.chunk_index += 1
+        rec.chunk_started_at = time.monotonic()
+        task = asyncio.create_task(self.flush_sink(rec, old_sink, idx))
+        rec.flush_tasks.append(task)
+
+    async def flush_sink(self, rec: Recording, sink, idx: int):
+        """Read a finished sink (direct read, after the proven delay) and encode each
+        speaker's chunk to .ogg on disk."""
+        await asyncio.sleep(STOP_READ_DELAY_SECONDS)
+        try:
+            audio = getattr(sink, "audio_data", {}) or {}
+        except Exception as e:
+            log.warning("chunk %d: sink read failed: %r", idx, e)
+            return
+        canonical = 0.0
+        for key, data in audio.items():
+            try:
+                data.file.seek(0)
+                blob = data.file.read()
+            except Exception as e:
+                log.warning("chunk %d: could not read track for %s: %r", idx, key, e)
+                continue
+            frames, rate = _wav_params(blob)
+            secs = (frames / rate) if (frames and rate) else 0.0
+            canonical = max(canonical, secs)
+            uid = str(getattr(key, "id", key))
+            out = os.path.join(rec.tmpdir, f"{uid}-{idx}.ogg")
+            if await encode_wav_to_ogg(blob, out):
+                rec.speaker_chunks.setdefault(uid, []).append((idx, out, secs))
+                log.info("  chunk %d: speaker %s %.1fs (%d KB wav -> ogg)", idx, uid, secs, len(blob) // 1024)
+        rec.chunk_seconds[idx] = canonical
+
+    async def reconnect(self, rec: Recording) -> bool:
+        try:
+            try:
+                await rec.vc.disconnect(force=True)
+            except Exception:
+                pass
+            channel = self.get_channel(int(rec.channel_id))
+            if channel is None:
+                return False
+            rec.vc = await channel.connect(timeout=30.0, reconnect=False)
+            rec.sink = discord.sinks.WaveSink()
+            rec.vc.start_recording(rec.sink, _after_record)
+            rec.chunk_started_at = time.monotonic()
+            log.info("recording %s: reconnected and resumed (chunk %d).", rec.rid, rec.chunk_index)
+            return True
+        except Exception as e:
+            log.warning("recording %s: reconnect failed: %r", rec.rid, e)
+            return False
 
     async def do_stop(self, http, row):
         rid = row["id"]
-        rec = self.recordings.pop(rid, None)
+        rec = self.recordings.get(rid)
         self.waiting_logged.discard(rid)
         if rec is None:
             log.info("stop %s: no active recording in this process; marking done.", rid)
             await self.patch_status(http, rid, "done")
             return
+        # Final rotation (no restart), then finalize.
+        if rec.sink is not None:
+            await self.rotate_chunk(rec, restart=False)
+        await self.finalize(http, rec)
 
-        vc = rec["vc"]
-        sink = rec["sink"]
-        campaign_id = rec.get("campaign_id")
-        session_id = rec.get("session_id")
-
+    async def finalize(self, http, rec: Recording, note=None):
+        self.recordings.pop(rec.rid, None)
         try:
-            vc.stop_recording()
-        except Exception as e:
-            log.warning("stop %s: stop_recording raised: %r", rid, e)
-        await asyncio.sleep(STOP_READ_DELAY_SECONDS)
-
-        # 1) Read the sink directly and attribute each speaker to a character.
-        collected = []  # (character_id, blob, duration, uid)
-        unmapped = 0
-        try:
-            audio = getattr(sink, "audio_data", {}) or {}
-            for key, data in audio.items():
-                try:
-                    data.file.seek(0)
-                    blob = data.file.read()
-                except Exception as e:
-                    log.warning("stop %s: could not read track for %s: %r", rid, key, e)
-                    continue
-                uid = str(getattr(key, "id", key))
-                char_id = await self.resolve_character(http, campaign_id, uid)
-                dur = _wav_duration_seconds(blob)
-                if not char_id:
-                    unmapped += 1
-                    log.warning("  unmapped speaker discord_id=%s bytes=%d (no claimed character); skipping.",
-                                uid, len(blob))
-                    continue
-                collected.append((char_id, blob, dur, uid))
-                log.info("  track: discord_id=%s character=%s bytes=%d duration=%ss",
-                         uid, char_id, len(blob), dur)
-        except Exception as e:
-            log.warning("stop %s: reading sink failed: %r", rid, e)
-
-        try:
-            await vc.disconnect()
+            await rec.vc.disconnect()
         except Exception:
             pass
+        if rec.flush_tasks:
+            await asyncio.gather(*rec.flush_tasks, return_exceptions=True)
 
-        if not collected:
-            log.info("stop %s: no attributable audio (%d unmapped); marking done without a job.", rid, unmapped)
-            await self.patch_status(http, rid, "done", error=("all speakers unmapped" if unmapped else None))
+        if not rec.speaker_chunks:
+            log.info("stop %s: no audio captured; marking done.", rec.rid)
+            await self.patch_status(http, rec.rid, "done", error=note)
+            rec.cleanup()
+            return
+        if not (rec.campaign_id and rec.session_id):
+            await self.patch_status(http, rec.rid, "error", error="missing campaign or session")
+            rec.cleanup()
             return
 
-        if not (campaign_id and session_id):
-            log.warning("stop %s: missing campaign/session; cannot create job.", rid)
-            await self.patch_status(http, rid, "error", error="missing campaign or session")
-            return
-
-        # 2) Create ONE draft capture job for this recording (source 'online' per the CHECK constraint).
-        job_id = await self.create_job(http, campaign_id, session_id)
+        # Attribute speakers -> characters; build one continuous ogg per mapped speaker.
+        job_id = await self.create_job(http, rec.campaign_id, rec.session_id)
         if not job_id:
-            await self.patch_status(http, rid, "error", error="could not create capture job")
+            await self.patch_status(http, rec.rid, "error", error="could not create capture job")
+            rec.cleanup()
             return
 
-        # 3) Upload each speaker's WAV and write an audio_tracks row (status 'pending').
         uploaded = 0
-        for (char_id, blob, dur, uid) in collected:
-            path = f"{campaign_id}/{job_id}/{char_id}-{int(time.time() * 1000)}.wav"
-            if not await self.upload_wav(http, path, blob):
-                log.warning("stop %s: upload failed for character %s; skipping track.", rid, char_id)
+        unmapped = 0
+        for uid, chunks in rec.speaker_chunks.items():
+            char_id = await self.resolve_character(http, rec.campaign_id, uid)
+            if not char_id:
+                unmapped += 1
+                log.warning("  unmapped speaker discord_id=%s (%d chunk(s)); skipping.", uid, len(chunks))
                 continue
-            if await self.insert_track(http, job_id, campaign_id, char_id, path, dur):
+            chunks.sort(key=lambda c: c[0])
+            have = {c[0] for c in chunks}
+            # Leading/interior silence for chunks this speaker missed, keeping speakers aligned.
+            parts = []
+            total_secs = 0.0
+            max_idx = max(have)
+            for idx in range(0, max_idx + 1):
+                if idx in have:
+                    path = next(c[1] for c in chunks if c[0] == idx)
+                    secs = next(c[2] for c in chunks if c[0] == idx)
+                    parts.append(path)
+                    total_secs += secs
+                else:
+                    pad = rec.chunk_seconds.get(idx, 0.0)
+                    if pad > 0.2:
+                        sil = os.path.join(rec.tmpdir, f"sil-{idx}.ogg")
+                        if not os.path.exists(sil):
+                            await make_silence_ogg(pad, sil)
+                        if os.path.exists(sil):
+                            parts.append(sil)
+                            total_secs += pad
+            final_path = os.path.join(rec.tmpdir, f"final-{uid}.ogg")
+            if len(parts) == 1:
+                shutil.copyfile(parts[0], final_path)
+            elif not await concat_oggs(parts, final_path):
+                log.warning("  concat failed for speaker %s; skipping.", uid)
+                continue
+            storage_path = f"{rec.campaign_id}/{job_id}/{char_id}-{int(time.time() * 1000)}.ogg"
+            with open(final_path, "rb") as f:
+                blob = f.read()
+            if not await self.upload_blob(http, storage_path, blob, "audio/ogg"):
+                log.warning("  upload failed for character %s; skipping.", char_id)
+                continue
+            if await self.insert_track(http, job_id, rec.campaign_id, char_id, storage_path, round(total_secs)):
                 uploaded += 1
-                log.info("  uploaded track: character=%s -> %s", char_id, path)
+                log.info("  uploaded track: character=%s %.0fs %d KB -> %s",
+                         char_id, total_secs, len(blob) // 1024, storage_path)
 
-        # 4) Link the control row to the job and finish.
-        await self.patch_status(http, rid, "done", capture_job_id=job_id)
-        log.info("STOPPED: request %s -> job %s; %d track(s) uploaded, %d unmapped speaker(s).",
-                 rid, job_id, uploaded, unmapped)
+        await self.patch_status(http, rec.rid, "done", capture_job_id=job_id, error=note)
+        log.info("STOPPED: request %s -> job %s; %d track(s) uploaded, %d unmapped speaker(s), %d chunk(s).",
+                 rec.rid, job_id, uploaded, unmapped, rec.chunk_index)
+        rec.cleanup()
 
-    # --- data helpers -------------------------------------------------------
+    # ------------------------------------------------------------ data helpers
 
     async def resolve_character(self, http, campaign_id, discord_uid):
         if not campaign_id or not discord_uid:
@@ -303,7 +511,7 @@ class Sidecar(discord.Client):
                 json={
                     "campaign_id": campaign_id,
                     "session_id": session_id,
-                    "source": "online",   # CHECK constraint allows only 'online' | 'in_person'
+                    "source": "online",
                     "status": "draft",
                 },
             )
@@ -314,17 +522,17 @@ class Sidecar(discord.Client):
             log.warning("create_job failed: %r", e)
             return None
 
-    async def upload_wav(self, http, path, blob):
+    async def upload_blob(self, http, path, blob, content_type):
         try:
             r = await http.post(
                 f"{STORAGE}/{AUDIO_BUCKET}/{path}",
-                headers={**HEADERS, "Content-Type": "audio/wav", "x-upsert": "true"},
+                headers={**HEADERS, "Content-Type": content_type, "x-upsert": "true"},
                 content=blob,
             )
             r.raise_for_status()
             return True
         except Exception as e:
-            log.warning("upload_wav(%s) failed: %r", path, e)
+            log.warning("upload(%s) failed: %r", path, e)
             return False
 
     async def insert_track(self, http, job_id, campaign_id, character_id, storage_path, duration):
@@ -336,7 +544,7 @@ class Sidecar(discord.Client):
                 "storage_path": storage_path,
                 "status": "pending",
             }
-            if duration is not None:
+            if duration:
                 body["duration_seconds"] = duration
             r = await http.post(f"{REST}/audio_tracks", headers=WRITE_HEADERS, json=body)
             r.raise_for_status()
@@ -364,6 +572,7 @@ class Sidecar(discord.Client):
 
 
 def main():
+    install_opus_rekey_guard()
     intents = discord.Intents.none()
     intents.guilds = True
     intents.voice_states = True

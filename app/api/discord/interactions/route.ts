@@ -135,7 +135,7 @@ export async function POST(request: Request) {
 
 // Resolve the campaign for a command: explicit share code, else the linked channel.
 async function resolveCampaign(interaction: Interaction, sb: ReturnType<typeof serviceClient>) {
-  const code = optionValue(interaction, "code");
+  const code = (optionValue(interaction, "code") ?? "").trim().toLowerCase() || null;
   const chan = channelId(interaction);
   if (code) {
     const { data } = await sb.from("campaigns").select("id, name").eq("share_code", code).single();
@@ -157,7 +157,7 @@ async function handleSetup(interaction: Interaction) {
     return ephemeral("You need the Manage Server permission to link recaps to this channel.");
   }
 
-  const code = optionValue(interaction, "code");
+  const code = (optionValue(interaction, "code") ?? "").trim().toLowerCase();
   if (!code) {
     return ephemeral("Usage: /setup code:<your campaign share code>");
   }
